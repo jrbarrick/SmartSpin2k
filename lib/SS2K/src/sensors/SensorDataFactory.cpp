@@ -14,6 +14,7 @@
 #include "sensors/HeartRateData.h"
 #include "sensors/EchelonData.h"
 #include "sensors/PelotonData.h"
+#include "sensors/JorotoData.h"
 
 std::shared_ptr<SensorData> SensorDataFactory::getSensorData(const NimBLEUUID characteristicUUID, const uint64_t peerAddress, uint8_t *data, size_t length) {
   for (auto &it : SensorDataFactory::knownDevices) {

@@ -113,6 +113,14 @@ const char * const DEFAULT_PASSWORD = "password";
 // This is used to set the upper travel limit for the motor.
 #define MAX_ECHELON_RESISTANCE 30
 
+// Minimum resistance on a Joroto Bike.
+// This is used to set the lower travel limit for the motor.
+#define MIN_JOROTO_RESISTANCE 1
+
+// Maximum resistance on a Joroto Bike.
+// This is used to set the upper travel limit for the motor.
+#define MAX_JOROTO_RESISTANCE 100
+
 // Resistance range when no bike with resistance is connected.
 #define DEFAULT_RESISTANCE_RANGE 2000
 
@@ -180,6 +188,9 @@ const char * const DEFAULT_PASSWORD = "password";
 
 // Hardware pin for stepper dir
 #define r2_DIR_PIN 33
+
+// Hardware pin for potentiometer
+#define POT_PIN 35
 
 // TMC2209 SoftwareSerial receive pin
 #define r2_STEPPER_SERIAL_RX 18
