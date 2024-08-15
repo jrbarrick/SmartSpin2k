@@ -110,13 +110,9 @@ void setup() {
   // Initialize LittleFS
   SS2K_LOG(MAIN_LOG_TAG, "Mounting Filesystem");
   if (!LittleFS.begin(false)) {
-    // FSUpgrader upgrade;
     SS2K_LOG(MAIN_LOG_TAG, "An Error has occurred while mounting LittleFS.");
-    LittleFS.format();
-    vTaskDelay(100/portTICK_PERIOD_MS);
-    // BEGIN FS UPGRADE SPECIFIC//
-    // upgrade.upgradeFS();
-    // END FS UPGRADE SPECIFIC//
+    LittleFS.format();                     // Format so that the settings can be saved.
+    vTaskDelay(100 / portTICK_PERIOD_MS);  // Provide some time for the format to happen.
   }
 
   // Load Config
@@ -319,17 +315,6 @@ void SS2K::maintenanceLoop(void *pvParameters) {
         rebootTimer       = millis();
       }
 
-      // Prevent occasional runaway scans
-      if (NimBLEDevice::getScan()->isScanning()) {
-        if (isScanning == true) {
-          SS2K_LOGW(MAIN_LOG_TAG, "Forcing Scan to stop.");
-          spinBLEClient.doScan = false;
-          NimBLEDevice::getScan()->stop();
-          isScanning = false;
-        } else {
-          isScanning = true;
-        }
-      }
       intervalTimer2 = millis();
     }
 
@@ -432,19 +417,12 @@ void SS2K::restartWifi() {
 }
 
 void SS2K::moveStepper(void *pvParameters) {
-  engine.init();
   bool _stepperDir = userConfig->getStepperDir();
-  stepper          = engine.stepperConnectToPin(currentBoard.stepPin);
-  stepper->setDirectionPin(currentBoard.dirPin, _stepperDir);
-  stepper->setEnablePin(currentBoard.enablePin);
-  stepper->setAutoEnable(true);
-  stepper->setSpeedInHz(DEFAULT_STEPPER_SPEED);
-  stepper->setAcceleration(STEPPER_ACCELERATION);
-  stepper->setDelayToDisable(1000);
 
   while (1) {
     if (stepper) {
       ss2k->stepperIsRunning = stepper->isRunning();
+      ss2k->currentPosition  = stepper->getCurrentPosition();
       if (!ss2k->externalControl) {
         if ((rtConfig->getFTMSMode() == FitnessMachineControlPointProcedure::SetTargetPower) ||
             (rtConfig->getFTMSMode() == FitnessMachineControlPointProcedure::SetTargetResistanceLevel)) {
@@ -481,9 +459,8 @@ void SS2K::moveStepper(void *pvParameters) {
           stepper->moveTo(rtConfig->getMaxStep());
         }
       }
-
-      vTaskDelay(100 / portTICK_PERIOD_MS);
       rtConfig->setCurrentIncline((float)stepper->getCurrentPosition());
+      vTaskDelay(100 / portTICK_PERIOD_MS);
 
       if (connectedClientCount() > 0) {
         stepper->setAutoEnable(false);  // Keep the stepper from rolling back due to head tube slack. Motor Driver still lowers power between moves
@@ -554,23 +531,30 @@ void SS2K::resetIfShiftersHeld() {
 }
 
 void SS2K::setupTMCStepperDriver() {
+  // FastAccel setup
+  engine.init();
+  stepper = engine.stepperConnectToPin(currentBoard.stepPin);
+  stepper->setDirectionPin(currentBoard.dirPin, userConfig->getStepperDir());
+  stepper->setEnablePin(currentBoard.enablePin);
+  stepper->setAutoEnable(true);
+  stepper->setSpeedInHz(DEFAULT_STEPPER_SPEED);
+  stepper->setAcceleration(STEPPER_ACCELERATION);
+  stepper->setDelayToDisable(1000);
+
+  // TMC Driver Setup
   driver.begin();
   driver.pdn_disable(true);
   driver.mstep_reg_select(true);
-
+  ss2k->updateStepperSpeed();
   ss2k->updateStepperPower();
   driver.microsteps(4);  // Set microsteps to 1/8th
   driver.irun(currentBoard.pwrScaler);
   driver.ihold((uint8_t)(currentBoard.pwrScaler * .5));  // hold current % 0-DRIVER_MAX_PWR_SCALER
   driver.iholddelay(10);                                 // Controls the number of clock cycles for motor
-                                                         // power down after standstill is detected
+  // power down after standstill is detected
   driver.TPOWERDOWN(128);
-
   driver.toff(5);
-  bool t_bool = userConfig->getStealthChop();
-  driver.en_spreadCycle(!t_bool);
-  driver.pwm_autoscale(t_bool);
-  driver.pwm_autograd(t_bool);
+  ss2k->updateStealthChop();
 }
 
 // Applies current power to driver
