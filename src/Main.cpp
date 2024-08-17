@@ -245,46 +245,7 @@ void SS2K::maintenanceLoop(void *pvParameters) {
     if ((millis() - intervalTimer) > 2003) {  // add check here for when to restart WiFi
                                               // maybe if in STA mode and 8.8.8.8 no ping return?
       // ss2k->restartWifi();
-
-      // Testing potentiometer reads
-      // <50 is 0%, >2500 is 100%
-      // Do 3 reads to get a smoothed value
-      potValue = analogRead(POT_PIN);
-      potValue += analogRead(POT_PIN);
-      potValue += analogRead(POT_PIN);
-      potValue /= 3;
-      SS2K_LOG(MAIN_LOG_TAG, "Smoothed potentiometer value is: %d", potValue);
-      if (potValue == 4095) {
-        //rtConfig->watts.setSimulate(false);
-        SS2K_LOG(MAIN_LOG_TAG, "Resistance potentiometer not connected.");
-      }
-      else if (potValue == 0) {
-        //rtConfig->watts.setSimulate(false);
-        SS2K_LOG(MAIN_LOG_TAG, "Resistance potentiometer too low or not connected.");
-      }
-      else {
-        if (potValue < 50) { potPercent = 1; }
-        else if(potValue >= 2500) { potPercent = 100; }
-        else { potPercent = potValue / 25; }
-        SS2K_LOG(MAIN_LOG_TAG, "Adjusted potentiometer percent is: %d%%", potPercent);
-        cadence = rtConfig->cad.getValue();
-        if (cadence < 15) { cadence = 0; }
-        SS2K_LOG(MAIN_LOG_TAG, "Cadence is: %d", cadence);
-        if (potPercent < 10) { 
-          power = potPercent * pow((cadence / 100.0), 1.5) * 7.228958 + (cadence - (cadence / 100) * 60);
-        } else { 
-          power = potPercent * pow((cadence / 100.0), 1.5) * 7.228958 + (cadence - 40);
-        }
-        SS2K_LOG(MAIN_LOG_TAG, "Power is: %d", power);
-        if (power < 0) { power = 0; }
-        SS2K_LOG(MAIN_LOG_TAG, "Adjusted Power is: %d", power);
-        //rtConfig->watts.setSimulate(true);
-        rtConfig->setMaxResistance(1);
-        rtConfig->setMaxResistance(99);
-        rtConfig->resistance.setValue(potPercent);
-        rtConfig->watts.setValue(power);
-      } 
-      
+     
       logHandler.writeLogs();
       webSocketAppender.Loop();
       intervalTimer = millis();
