@@ -69,18 +69,18 @@ void collectAndSet(NimBLEUUID charUUID, NimBLEUUID serviceUUID, NimBLEAddress ad
       if (potValue == 4095) {
         logBufLength += snprintf(logBuf + logBufLength, kLogBufMaxLength - logBufLength, "Pot not connected.");
       }
-      else if (potValue == 0) {
-        logBufLength += snprintf(logBuf + logBufLength, kLogBufMaxLength - logBufLength, "Pot too low.");
-      }
+      //else if (potValue == 0) {
+        //logBufLength += snprintf(logBuf + logBufLength, kLogBufMaxLength - logBufLength, "Pot too low.");
+      //}
       else {
         // Potentiometer < 50 is min according to Joroto display
         if (potValue < 50) { potPercent = 1; }
-        // Potentiometer >=2500 is max according to Jorot display
+        // Potentiometer >=2500 is max according to Joroto display
         else if(potValue >= 2500) { potPercent = 100; }
         // Percentage on Joroto display is the potentiometer value / 25
         else { potPercent = potValue / 25; }
-        rtConfig->setMinResistance(5);
-        rtConfig->setMaxResistance(98);
+        rtConfig->setMinResistance(MIN_PELOTON_RESISTANCE);
+        rtConfig->setMaxResistance(MAX_PELOTON_RESISTANCE);
         rtConfig->resistance.setValue(potPercent);
         logBufLength += snprintf(logBuf + logBufLength, kLogBufMaxLength - logBufLength, " RS(%d)", potPercent);
         jorotoCadence = rtConfig->cad.getValue();
@@ -88,9 +88,11 @@ void collectAndSet(NimBLEUUID charUUID, NimBLEUUID serviceUUID, NimBLEAddress ad
         if (jorotoCadence < 15) { jorotoCadence = 0; }
         // Joroto power calc gets weird when resistance is below 10%
         if (potPercent < 10) {
-          jorotoPower = potPercent * pow((jorotoCadence / 100.0), 1.5) * 7.228958 + (jorotoCadence - (jorotoCadence / 100) * 60);
+          jorotoPower = potPercent * pow((jorotoCadence / 100.0f), 1.5f) * 7.228958f + jorotoCadence - (jorotoCadence / 100.0f) * 60.0f;
+          logBufLength += snprintf(logBuf + logBufLength, kLogBufMaxLength - logBufLength, " Low Calc");
         } else { 
-          jorotoPower = potPercent * pow((jorotoCadence / 100.0), 1.5) * 7.228958 + (jorotoCadence - 40);
+          jorotoPower = potPercent * pow((jorotoCadence / 100.0f), 1.5f) * 7.228958f + jorotoCadence - 40;
+          logBufLength += snprintf(logBuf + logBufLength, kLogBufMaxLength - logBufLength, " Reg Calc");
         }
         // Can sometimes get weird power cals at very low cadence/resistance levels, just set power to 0
         if (jorotoPower < 0) { jorotoPower = 0; }
