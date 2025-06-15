@@ -88,10 +88,10 @@ void collectAndSet(NimBLEUUID charUUID, NimBLEUUID serviceUUID, NimBLEAddress ad
         if (jorotoCadence < 15) { jorotoCadence = 0; }
         // Joroto power calc gets weird when resistance is below 10%
         if (potPercent < 10) {
-          jorotoPower = potPercent * pow((jorotoCadence / 100.0f), 1.5f) * 7.228958f + jorotoCadence - (jorotoCadence / 100.0f) * 60.0f;
+          jorotoPower = potValue / 25.0f * pow((jorotoCadence / 100.0f), 1.5f) * 7.228958f + jorotoCadence - (jorotoCadence / 100.0f) * 60.0f;
           logBufLength += snprintf(logBuf + logBufLength, kLogBufMaxLength - logBufLength, " Low Calc");
         } else { 
-          jorotoPower = potPercent * pow((jorotoCadence / 100.0f), 1.5f) * 7.228958f + jorotoCadence - 40;
+          jorotoPower = potValue / 25.0f * pow((jorotoCadence / 100.0f), 1.5f) * 7.228958f + jorotoCadence - 40;
           logBufLength += snprintf(logBuf + logBufLength, kLogBufMaxLength - logBufLength, " Reg Calc");
         }
         // Can sometimes get weird power cals at very low cadence/resistance levels, just set power to 0
