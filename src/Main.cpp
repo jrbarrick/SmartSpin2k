@@ -121,6 +121,7 @@ extern "C" void app_main() {
   pinMode(currentBoard.shiftUpPin, INPUT_PULLUP);    // Push-Button with input Pullup
   pinMode(currentBoard.shiftDownPin, INPUT_PULLUP);  // Push-Button with input Pullup
   pinMode(LED_PIN, OUTPUT);
+  pinMode(POT_PIN, INPUT);
   pinMode(currentBoard.enablePin, OUTPUT);
   pinMode(currentBoard.dirPin, OUTPUT);   // Stepper Direction Pin
   pinMode(currentBoard.stepPin, OUTPUT);  // Stepper Step Pin
@@ -182,6 +183,11 @@ void loop() {  // Delete this task so we can make one that's more memory efficie
 void SS2K::maintenanceLoop(void* pvParameters) {
   static unsigned long intervalTimer2 = millis();
   static unsigned long rebootTimer    = millis();
+  static bool isScanning              = false;
+  static int potValue                 = 0;
+  static int potPercent               = 0;
+  static int cadence                  = 0;
+  static signed int power             = 0;
 
   while (true) {
     delay(10);
@@ -286,6 +292,17 @@ void SS2K::maintenanceLoop(void* pvParameters) {
     if (ss2k->saveFlag) {
       ss2k->saveFlag = false;
       userConfig->saveToLittleFS();
+      userPWC->saveToLittleFS();
+    }
+
+    // Things to do every two seconds
+    if ((millis() - intervalTimer) > 2003) {  // add check here for when to restart WiFi
+                                              // maybe if in STA mode and 8.8.8.8 no ping return?
+      // ss2k->restartWifi();
+     
+      logHandler.writeLogs();
+      webSocketAppender.Loop();
+      intervalTimer = millis();
     }
 
     // Things to do every 6 seconds
