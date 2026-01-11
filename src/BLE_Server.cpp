@@ -8,6 +8,11 @@
 #include "Main.h"
 #include "SS2KLog.h"
 #include "BLE_Common.h"
+#include <ArduinoJson.h>
+#include <Constants.h>
+#include <NimBLEDevice.h>
+#include <cmath>
+#include <limits>
 #include "BLE_Cycling_Speed_Cadence.h"
 #include "BLE_Cycling_Power_Service.h"
 #include "BLE_Heart_Service.h"
@@ -15,16 +20,10 @@
 #include "BLE_Custom_Characteristic.h"
 #include "BLE_Device_Information_Service.h"
 
-#include <ArduinoJson.h>
-#include <Constants.h>
-#include <NimBLEDevice.h>
-#include <cmath>
-#include <limits>
-
 // BLE Server Settings
 SpinBLEServer spinBLEServer;
 
-static MyCallbacks chrCallbacks;
+static MyCharacteristicCallbacks chrCallbacks;
 
 BLE_Cycling_Speed_Cadence cyclingSpeedCadenceService;
 BLE_Cycling_Power_Service cyclingPowerService;
@@ -32,6 +31,8 @@ BLE_Heart_Service heartService;
 BLE_Fitness_Machine_Service fitnessMachineService;
 BLE_ss2kCustomCharacteristic ss2kCustomCharacteristic;
 BLE_Device_Information_Service deviceInformationService;
+// BLE_Wattbike_Service wattbikeService;
+// BLE_SB20_Service sb20Service;
 
 void startBLEServer() {
   // Server Setup
@@ -40,30 +41,40 @@ void startBLEServer() {
   spinBLEServer.pServer->setCallbacks(new MyServerCallbacks());
 
   // start services
+  BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->enableScanResponse(true);
+  NimBLEAdvertisementData oScanResponseData;
+  NimBLEAdvertisementData oAdvertisementData;
+  std::vector<NimBLEUUID> oServiceUUIDs;
+  oScanResponseData.setFlags(0x06);  // General Discoverable, BR/EDR Not Supported
+  oScanResponseData.setCompleteServices(SMARTSPIN2K_SERVICE_UUID);
   cyclingSpeedCadenceService.setupService(spinBLEServer.pServer, &chrCallbacks);
   cyclingPowerService.setupService(spinBLEServer.pServer, &chrCallbacks);
   heartService.setupService(spinBLEServer.pServer, &chrCallbacks);
   fitnessMachineService.setupService(spinBLEServer.pServer, &chrCallbacks);
   ss2kCustomCharacteristic.setupService(spinBLEServer.pServer);
   deviceInformationService.setupService(spinBLEServer.pServer);
-  
-  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  //add all service UUIDs to advertisement vector
+  oServiceUUIDs.push_back(CSCSERVICE_UUID);
+  oServiceUUIDs.push_back(CYCLINGPOWERSERVICE_UUID);
+  oServiceUUIDs.push_back(HEARTSERVICE_UUID);
+  oServiceUUIDs.push_back(FITNESSMACHINESERVICE_UUID);
+  oAdvertisementData.setFlags(0x06);  // General Discoverable, BR/EDR Not Supported
+  oAdvertisementData.setCompleteServices16(oServiceUUIDs);
+  pAdvertising->setAdvertisementData(oAdvertisementData);
+  pAdvertising->setScanResponseData(oScanResponseData);
+  // wattbikeService.setupService(spinBLEServer.pServer);  // No callback needed
+  // sb20Service.begin();
+  BLEFirmwareSetup(spinBLEServer.pServer);
+
   // const std::string fitnessData = {0b00000001, 0b00100000, 0b00000000};
   // pAdvertising->setServiceData(FITNESSMACHINESERVICE_UUID, fitnessData);
-
-  pAdvertising->addServiceUUID(FITNESSMACHINESERVICE_UUID);
-  pAdvertising->addServiceUUID(CYCLINGPOWERSERVICE_UUID);
-  pAdvertising->addServiceUUID(CSCSERVICE_UUID);
-  pAdvertising->addServiceUUID(HEARTSERVICE_UUID);
-  pAdvertising->addServiceUUID(SMARTSPIN2K_SERVICE_UUID);
+  pAdvertising->setName(userConfig->getDeviceName());
   pAdvertising->setMaxInterval(250);
   pAdvertising->setMinInterval(160);
-  pAdvertising->setScanResponse(true);
+  pAdvertising->start();
 
-  BLEFirmwareSetup();
-  BLEDevice::startAdvertising();
-
-  SS2K_LOG(BLE_SERVER_LOG_TAG, "Bluetooth Characteristic defined!");
+  SS2K_LOG(BLE_SERVER_LOG_TAG, "Bluetooth Characteristics defined!");
 }
 
 void SpinBLEServer::update() {
@@ -74,6 +85,8 @@ void SpinBLEServer::update() {
   cyclingPowerService.update();
   cyclingSpeedCadenceService.update();
   fitnessMachineService.update();
+  // wattbikeService.parseNemit();  // Changed from update() to parseNemit()
+  // sb20Service.notify();
 }
 
 double SpinBLEServer::calculateSpeed() {
@@ -106,9 +119,9 @@ void SpinBLEServer::updateWheelAndCrankRev() {
   }
 
   // Calculate wheel revolutions per minute
-  float wheelRpm        = (wheelSpeedMps / wheelSize) * 60;
-  double wheelRevPeriod = (60 * 1024) / wheelRpm;
+  float wheelRpm = (wheelSpeedMps / wheelSize) * 60;
   if (wheelRpm > 0) {
+    double wheelRevPeriod = (60 * 1024) / wheelRpm;
     spinBLEClient.cscCumulativeWheelRev++;                // Increment cumulative wheel revolutions
     spinBLEClient.cscLastWheelEvtTime += wheelRevPeriod;  // Convert RPM to time, ensuring no division by zero
   }
@@ -122,8 +135,8 @@ void SpinBLEServer::updateWheelAndCrankRev() {
 }
 
 // Creating Server Connection Callbacks
-void MyServerCallbacks::onConnect(BLEServer *pServer, ble_gap_conn_desc *desc) {
-  SS2K_LOG(BLE_SERVER_LOG_TAG, "Bluetooth Remote Client Connected: %s Connected Clients: %d", NimBLEAddress(desc->peer_ota_addr).toString().c_str(), pServer->getConnectedCount());
+void MyServerCallbacks::onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) {
+  SS2K_LOG(BLE_SERVER_LOG_TAG, "Bluetooth Remote Client Connected: %s Connected Clients: %d", connInfo.getAddress().toString().c_str(), pServer->getConnectedCount());
 
   if (pServer->getConnectedCount() < CONFIG_BT_NIMBLE_MAX_CONNECTIONS - NUM_BLE_DEVICES) {
     BLEDevice::startAdvertising();
@@ -133,7 +146,7 @@ void MyServerCallbacks::onConnect(BLEServer *pServer, ble_gap_conn_desc *desc) {
   }
 }
 
-void MyServerCallbacks::onDisconnect(BLEServer *pServer) {
+void MyServerCallbacks::onDisconnect(NimBLEServer* pServer) {
   SS2K_LOG(BLE_SERVER_LOG_TAG, "Bluetooth Remote Client Disconnected. Remaining Clients: %d", pServer->getConnectedCount());
   BLEDevice::startAdvertising();
   // client disconnected while trying to write fw - reboot to clear the faulty upload.
@@ -143,60 +156,68 @@ void MyServerCallbacks::onDisconnect(BLEServer *pServer) {
   }
 }
 
-bool MyServerCallbacks::onConnParamsUpdateRequest(NimBLEClient *pClient, const ble_gap_upd_params *params) {
-  SS2K_LOG(BLE_SERVER_LOG_TAG, "Updated Server Connection Parameters for %s", pClient->getPeerAddress().toString().c_str());
+void MyServerCallbacks::onMTUChange(uint16_t MTU, NimBLEConnInfo& connInfo) {
+  SS2K_LOG(BLE_SERVER_LOG_TAG, "MTU updated: %u for connection ID: %u", MTU, connInfo.getConnHandle());
+}
+
+bool MyServerCallbacks::onConnParamsUpdateRequest(uint16_t handle, const ble_gap_upd_params* params) {
+  SS2K_LOG(BLE_SERVER_LOG_TAG, "Updated Server Connection Parameters for handle: %d", handle);
   return true;
-};
+}
 
 // END SERVER CALLBACKS
 
-void MyCallbacks::onWrite(BLECharacteristic *pCharacteristic) {
+void MyCharacteristicCallbacks::onRead(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) {
+  SS2K_LOG(BLE_SERVER_LOG_TAG, "Read from %s by client: %s", pCharacteristic->getUUID().toString().c_str(), connInfo.getAddress().toString().c_str());
+}
+
+void MyCharacteristicCallbacks::onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) {
   if (pCharacteristic->getUUID() == FITNESSMACHINECONTROLPOINT_UUID) {
     spinBLEServer.writeCache.push(pCharacteristic->getValue());
   } else {
-    SS2K_LOG(BLE_SERVER_LOG_TAG, "Write to %s is not supported", pCharacteristic->getUUID().toString());
+    SS2K_LOG(BLE_SERVER_LOG_TAG, "Write to %s is not supported", pCharacteristic->getUUID().toString().c_str());
   }
 }
 
-void MyCallbacks::onSubscribe(NimBLECharacteristic *pCharacteristic, ble_gap_conn_desc *desc, uint16_t subValue) {
+void MyCharacteristicCallbacks::onStatus(NimBLECharacteristic* pCharacteristic, int code) {
+// loop through and accumulate the data into a C++ string
+// only used for extensive logging.
+#ifndef DEBUG_BLE_TX_RX
+  return;
+#endif
+  std::string characteristicValue = pCharacteristic->getValue();
+  std::string logValue;
+  for (size_t i = 0; i < characteristicValue.length(); ++i) {
+    char buf[4];
+    snprintf(buf, sizeof(buf), "%02x ", (unsigned char)characteristicValue[i]);
+    logValue += buf;
+  }
+
+  SS2K_LOG(BLE_SERVER_LOG_TAG, "%s -> %s", pCharacteristic->getUUID().toString().c_str(), logValue.c_str());
+}
+
+void MyCharacteristicCallbacks::onSubscribe(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo, uint16_t subValue) {
   String str       = "Client ID: ";
   NimBLEUUID pUUID = pCharacteristic->getUUID();
-  str += desc->conn_handle;
+  str += connInfo.getConnHandle();
   str += " Address: ";
-  str += std::string(NimBLEAddress(desc->peer_ota_addr)).c_str();
+  str += connInfo.getAddress().toString().c_str();
   if (subValue == 0) {
     str += " Unsubscribed to ";
-    spinBLEServer.setClientSubscribed(pUUID, false);
   } else if (subValue == 1) {
     str += " Subscribed to notifications for ";
-    spinBLEServer.setClientSubscribed(pUUID, true);
   } else if (subValue == 2) {
     str += " Subscribed to indications for ";
-    spinBLEServer.setClientSubscribed(pUUID, true);
   } else if (subValue == 3) {
     str += " Subscribed to notifications and indications for ";
-    spinBLEServer.setClientSubscribed(pUUID, true);
   }
   str += std::string(pCharacteristic->getUUID()).c_str();
 
   SS2K_LOG(BLE_SERVER_LOG_TAG, "%s", str.c_str());
 }
 
-//This might be worth depreciating. With multiple clients connected (SS2k App, + Training App), it at least needs to be an int, not a bool. 
-void SpinBLEServer::setClientSubscribed(NimBLEUUID pUUID, bool subscribe) {
-  if (pUUID == HEARTCHARACTERISTIC_UUID) {
-    spinBLEServer.clientSubscribed.Heartrate = subscribe;
-  } else if (pUUID == CYCLINGPOWERMEASUREMENT_UUID) {
-    spinBLEServer.clientSubscribed.CyclingPowerMeasurement = subscribe;
-  } else if (pUUID == FITNESSMACHINEINDOORBIKEDATA_UUID) {
-    spinBLEServer.clientSubscribed.IndoorBikeData = subscribe;
-  } else if (pUUID == CSCMEASUREMENT_UUID) {
-    spinBLEServer.clientSubscribed.CyclingSpeedCadence = subscribe;
-  }
-}
-
 // Return number of clients connected to our server.
-int connectedClientCount() {
+int SpinBLEServer::connectedClientCount() {
   if (BLEDevice::getServer()) {
     return BLEDevice::getServer()->getConnectedCount();
   } else {
@@ -204,41 +225,9 @@ int connectedClientCount() {
   }
 }
 
-void calculateInstPwrFromHR() {
-  static int oldHR    = rtConfig->hr.getValue();
-  static int newHR    = rtConfig->hr.getValue();
-  static double delta = 0;
-  oldHR               = newHR;  // Copying HR from Last loop
-  newHR               = rtConfig->hr.getValue();
-
-  delta = (newHR - oldHR) / ((BLE_CLIENT_DELAY / 1000) + 1);
-
-  // userConfig->setSimulatedWatts((s1Pwr*s2HR)-(s2Pwr*S1HR))/(S2HR-s1HR)+(userConfig->getSimulatedHr(*((s1Pwr-s2Pwr)/(s1HR-s2HR)));
-  int avgP = ((userPWC->session1Pwr * userPWC->session2HR) - (userPWC->session2Pwr * userPWC->session1HR)) / (userPWC->session2HR - userPWC->session1HR) +
-             (newHR * ((userPWC->session1Pwr - userPWC->session2Pwr) / (userPWC->session1HR - userPWC->session2HR)));
-
-  if (avgP < DEFAULT_MIN_WATTS) {
-    avgP = DEFAULT_MIN_WATTS;
-  }
-
-  if (delta < 0) {
-    // magic math here for inst power
-  }
-
-  if (delta > 0) {
-    // magic math here for inst power
-  }
-
-#ifndef DEBUG_HR_TO_PWR
-  rtConfig->watts.setValue(avgP);
-  rtConfig->cad.setValue(NORMAL_CAD);
-#endif  // DEBUG_HR_TO_PWR
-
-  SS2K_LOG(BLE_SERVER_LOG_TAG, "Power From HR: %d", avgP);
-}
-
-void logCharacteristic(char *buffer, const size_t bufferCapacity, const byte *data, const size_t dataLength, const NimBLEUUID serviceUUID, const NimBLEUUID charUUID,
-                       const char *format, ...) {
+void logCharacteristic(char* buffer, const size_t bufferCapacity, const byte* data, const size_t dataLength, const NimBLEUUID serviceUUID, const NimBLEUUID charUUID,
+                       const char* format, ...) {
+#ifdef DEBUG_BLE_TX_RX
   int bufferLength = ss2k_log_hex_to_buffer(data, dataLength, buffer, 0, bufferCapacity);
   bufferLength += snprintf(buffer + bufferLength, bufferCapacity - bufferLength, "-> %s | %s | ", serviceUUID.toString().c_str(), charUUID.toString().c_str());
   va_list args;
@@ -247,7 +236,5 @@ void logCharacteristic(char *buffer, const size_t bufferCapacity, const byte *da
   va_end(args);
 
   SS2K_LOG(BLE_SERVER_LOG_TAG, "%s", buffer);
-#ifdef USE_TELEGRAM
-  SEND_TO_TELEGRAM(String(buffer));
 #endif
 }

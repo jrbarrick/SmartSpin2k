@@ -7,7 +7,7 @@
 
 #pragma once
 
-#ifndef UNIT_TEST
+#ifndef PLATFORMIO_ENV_NATIVE
 #include <Arduino.h>
 #else
 #include <ArduinoFake.h>
@@ -22,6 +22,8 @@ class Measurement {
   bool simulate;
   int value;
   int target;
+  int min;
+  int max;
   unsigned long timestamp;
 
  public:
@@ -41,6 +43,13 @@ class Measurement {
     target          = tar;
     this->timestamp = millis();
   }
+
+  void setMin(int min) { this->min = min; }
+  int getMin() { return min; }
+
+  void setMax(int max) { this->max = max; }
+  int getMax() { return max; }
+
   int getTarget() { return target; }
 
   long getTimestamp() { return timestamp; }
@@ -49,36 +58,34 @@ class Measurement {
     this->simulate  = false;
     this->value     = 0;
     this->target    = 0;
+    this->min       = 0;
+    this->max       = 0;
     this->timestamp = millis();
   }
 };
 
 class RuntimeParameters {
  private:
-  double targetIncline  = 0.0;
-  double currentIncline = 0.0;
+  double targetIncline = 0.0;
   float simulatedSpeed = 0.0;
   uint8_t FTMSMode     = 0x00;
   int shifterPosition  = 0;
-  int32_t minStep          = -DEFAULT_STEPPER_TRAVEL;
-  int32_t maxStep          = DEFAULT_STEPPER_TRAVEL;
+  bool homed           = false;
+  int32_t minStep      = -DEFAULT_STEPPER_TRAVEL;
+  int32_t maxStep      = DEFAULT_STEPPER_TRAVEL;
   int minResistance    = -DEFAULT_RESISTANCE_RANGE;
   int maxResistance    = DEFAULT_RESISTANCE_RANGE;
   bool simTargetWatts  = false;
 
  public:
   Measurement watts;
-  Measurement pm_batt;
   Measurement hr;
-  Measurement hr_batt;
   Measurement cad;
+  Measurement batt;
   Measurement resistance;
 
   void setTargetIncline(float inc) { targetIncline = inc; }
   float getTargetIncline() { return targetIncline; }
-
-  void setCurrentIncline(float inc) { currentIncline = inc; }
-  float getCurrentIncline() { return currentIncline; }
 
   void setSimulatedSpeed(float spd) { simulatedSpeed = spd; }
   float getSimulatedSpeed() { return simulatedSpeed; }
@@ -89,11 +96,14 @@ class RuntimeParameters {
   void setShifterPosition(int sp) { shifterPosition = sp; }
   int getShifterPosition() { return shifterPosition; }
 
-  void setMinStep(int ms) { minStep = ms; }
-  int getMinStep() { return minStep; }
+  void setHomed(bool hmd) { homed = hmd; }
+  int getHomed() { return homed; }
 
-  void setMaxStep(int ms) { maxStep = ms; }
-  int getMaxStep() { return maxStep; }
+  void setMinStep(int32_t ms) { ms != INT32_MIN ? minStep = ms : minStep = -DEFAULT_STEPPER_TRAVEL; }
+  int32_t getMinStep() { return minStep; }
+
+  void setMaxStep(int32_t ms) { ms != INT32_MIN ? maxStep = ms : maxStep = DEFAULT_STEPPER_TRAVEL; }
+  int32_t getMaxStep() { return maxStep; }
 
   void setSimTargetWatts(int tgt) { simTargetWatts = tgt; }
   bool getSimTargetWatts() { return simTargetWatts; }
@@ -123,9 +133,12 @@ class userParameters {
   int stepperSpeed;
   bool stepperDir;
   bool shifterDir;
-  bool udpLogEnabled = false;
- 
+  bool pTab4Pwr              = false;
+  bool udpLogEnabled         = false;
+  int32_t hMin               = INT32_MIN;
+  int32_t hMax               = INT32_MIN;
   bool FTMSControlPointWrite = false;
+  int homingSensitivity      = DEFAULT_HOMING_SENSITIVITY;  // Use default from settings.h
   String ssid;
   String password;
   String connectedPowerMeter   = CONNECTED_POWER_METER;
@@ -197,23 +210,20 @@ class userParameters {
   void setUdpLogEnabled(bool enabled) { udpLogEnabled = enabled; }
   bool getUdpLogEnabled() { return udpLogEnabled; }
 
+  void setPTab4Pwr(bool pTab) { pTab4Pwr = pTab; }
+  bool getPTab4Pwr() { return pTab4Pwr; }
+
   void setFoundDevices(String fdv) { foundDevices = fdv; }
   const char* getFoundDevices() { return foundDevices.c_str(); }
 
-  void setDefaults();
-  String returnJSON();
-  void saveToLittleFS();
-  void loadFromLittleFS();
-  void printFile();
-};
+  void setHMin(int32_t min) { hMin = min; }
+  int32_t getHMin() { return hMin; }
 
-class physicalWorkingCapacity {
- public:
-  int session1HR;
-  int session1Pwr;
-  int session2HR;
-  int session2Pwr;
-  bool hr2Pwr;
+  void setHMax(int32_t max) { hMax = max; }
+  int32_t getHMax() { return hMax; }
+
+  void setHomingSensitivity(int sensitivity) { homingSensitivity = sensitivity; }
+  int getHomingSensitivity() { return homingSensitivity; }
 
   void setDefaults();
   String returnJSON();

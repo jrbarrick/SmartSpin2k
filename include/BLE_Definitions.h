@@ -7,12 +7,12 @@
 
 #pragma once
 
-//The .xml file is wrong, make sure to reference the actual FTMS .pdf
+// The .xml file is wrong, make sure to reference the actual FTMS .pdf
 struct FitnessMachineIndoorBikeDataFlags {
   enum Types : uint16_t {
     MoreDataBit                 = 1U << 0,
     AverageSpeedPresent         = 1U << 1,
-    InstantaneousCadencePresent = 1U << 2,    
+    InstantaneousCadencePresent = 1U << 2,
     AverageCadencePresent       = 1U << 3,
     TotalDistancePresent        = 1U << 4,
     ResistanceLevelPresent      = 1U << 5,
@@ -142,23 +142,41 @@ struct FitnessMachineControlPointProcedure {
 // https://www.bluetooth.com/specifications/specs/fitness-machine-service-1-0/
 // Table 4.17: Fitness Machine Status
 struct FitnessMachineStatus {
-  enum Types : uint {
+  enum Types : uint8_t {
     ReservedForFutureUse                  = 0x00,
     Reset                                 = 0x01,
     StoppedOrPausedByUser                 = 0x02,
-    StoppedOrPausedBySafetyKey            = 0x03,
+    StoppedBySafetyKey                    = 0x03,
     StartedOrResumedByUser                = 0x04,
     TargetSpeedChanged                    = 0x05,
     TargetInclineChanged                  = 0x06,
     TargetResistanceLevelChanged          = 0x07,
     TargetPowerChanged                    = 0x08,
     TargetHeartRateChanged                = 0x09,
+    TargetedExpendedEnergyChanged         = 0x0A,
+    TargetedNumberofStepsChanged          = 0x0B,
+    TargetedNumberofStridesChanged        = 0x0C,
+    TargetedDistanceChanged               = 0x0D,
+    TargetedTrainingTimeChanged           = 0x0E,
+    TargetedTimeinTwoHeartRateZonesChanged = 0x0F,
+    TargetedTimeinThreeHeartRateZonesChanged = 0x10,
+    TargetedTimeinFiveHeartRateZonesChanged = 0x11,
     IndoorBikeSimulationParametersChanged = 0x12,
     WheelCircumferenceChanged             = 0x13,
     SpinDownStatus                        = 0x14,
     TargetedCadenceChanged                = 0x15,
     // Reserved for Future Use 0x16-0xFE
-    ControlPermissionLost = 0xFF
+    ControlPermissionLost                 = 0xFF
+  };
+  // Table 4.27: Spin Down Status value definition
+  // These are the parameter values for the SpinDownStatus (0x14) Op Code
+  enum SpinDownParameters : uint8_t {
+    SpinDown_Reserved          = 0x00,
+    SpinDown_SpinDownRequested = 0x01,
+    SpinDown_Success           = 0x02,
+    SpinDown_Error             = 0x03,
+    SpinDown_StopPedaling      = 0x04
+    // Reserved for Future Use 0x05-0xFF
   };
 };
 
@@ -190,6 +208,27 @@ struct FtmsStatus {
   uint8_t data[8];
   int length;
 };
+
+// https://www.bluetooth.com/specifications/specs/cpp-1-1-html/
+// See "4.4. Cycling Power Feature"
+struct CyclingPowerFeatureFlags {
+  enum Types : uint32_t {
+    PedalPowerBalanceSupported           = 1U << 0,
+    AccumulatedTorqueSupported           = 1U << 1,
+    WheelRevolutionDataSupported         = 1U << 2,
+    CrankRevolutionDataSupported         = 1U << 3,
+    ExtremeMagnitudesSupported           = 1U << 4,
+    ExtremesAnglesSupported              = 1U << 5,
+    TopBottomDeadSpotAnglesSupported     = 1U << 6,
+    AccumulatedEnergySupported           = 1U << 7,
+    ExtremeTorquesSupported              = 1U << 8,
+    OffsetCompensationIndicatorSupported = 1U << 9,
+  };
+};
+
+inline CyclingPowerFeatureFlags::Types operator|(CyclingPowerFeatureFlags::Types a, CyclingPowerFeatureFlags::Types b) {
+  return static_cast<CyclingPowerFeatureFlags::Types>(static_cast<int>(a) | static_cast<int>(b));
+}
 
 class CyclingPowerMeasurement {
  public:
@@ -255,6 +294,21 @@ class CyclingPowerMeasurement {
     return data;
   }
 };
+
+// https://www.bluetooth.com/specifications/specs/cscs-1-0/
+// See "3.2. CSC Feature"
+struct CyclingSpeedCadenceFeatureFlags {
+  enum Types : uint16_t {
+    WheelRevolutionDataSupported     = 1U << 0,
+    CrankRevolutionDataSupported     = 1U << 1,
+    MultipleSensorLocationsSupported = 1U << 2
+    // 3-15: Reserved for Future Use
+  };
+};
+
+inline CyclingSpeedCadenceFeatureFlags::Types operator|(CyclingSpeedCadenceFeatureFlags::Types a, CyclingSpeedCadenceFeatureFlags::Types b) {
+  return static_cast<CyclingSpeedCadenceFeatureFlags::Types>(static_cast<int>(a) | static_cast<int>(b));
+}
 
 class CscMeasurement {
  public:

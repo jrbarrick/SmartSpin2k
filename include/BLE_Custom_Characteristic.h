@@ -30,8 +30,8 @@ const uint8_t BLE_stealthChop           = 0x0A;  // Stepper StealthChop (Makes i
 const uint8_t BLE_inclineMultiplier     = 0x0B;  // Incline * this = steps to move. 3.0 is a good starting value for most bikes.
 const uint8_t BLE_powerCorrectionFactor = 0x0C;  // Correction factor for FTMS and CPS connected devices. .1-2.0
 const uint8_t BLE_simulateHr            = 0x0D;  // If set to 1, override connected HR and use simulated above.
-const uint8_t BLE_simulateWatts         = 0x0E;  // "" for Power Meter
-const uint8_t BLE_simulateCad           = 0x0F;  // "" for Cad
+const uint8_t BLE_simulateWatts         = 0x0E;  // Are we sending watts
+const uint8_t BLE_simulateCad           = 0x0F;  // Are we sending cad
 const uint8_t BLE_FTMSMode              = 0x10;  // get or set FTMS mode using values such as FitnessMachineControlPointProcedure::SetTargetPower
 const uint8_t BLE_autoUpdate            = 0x11;  // Attempt to update firmware on reboot?
 const uint8_t BLE_ssid                  = 0x12;  // WiFi SSID. If it's not a network in range, fallback to AP mode made with devicename and "password"
@@ -56,6 +56,13 @@ const uint8_t BLE_scanBLE               = 0x24;  // Scan for new BLE devices
 const uint8_t BLE_firmwareVer           = 0x25;  // String of the current firmware version
 const uint8_t BLE_resetPowerTable       = 0x26;  // Delete all power table information.
 const uint8_t BLE_powerTableData        = 0x27;  // sets or requests power table data
+const uint8_t BLE_simulatedTargetWatts  = 0x28;  // current target watts
+const uint8_t BLE_simulateTargetWatts   = 0x29;  // are we sending target watts
+const uint8_t BLE_hMin                  = 0x2A;  // Minimum homing value
+const uint8_t BLE_hMax                  = 0x2B;  // Maximum homing value
+const uint8_t BLE_homingSensitivity     = 0x2C;  // Homing sensitivity value
+const uint8_t BLE_pTab4Pwr              = 0x2D;  // Use power values for power table
+const uint8_t BLE_UDPLogging            = 0x2E;  // Enable or disable UDP logging
 
 class BLE_ss2kCustomCharacteristic {
  public:
@@ -69,12 +76,13 @@ class BLE_ss2kCustomCharacteristic {
   static void parseNemit();
 
  private:
-  BLEService *pSmartSpin2kService;
-  BLECharacteristic *smartSpin2kCharacteristic;
+  NimBLEService *pSmartSpin2kService;
+  NimBLECharacteristic *smartSpin2kCharacteristic;
   uint8_t ss2kCustomCharacteristicValue[3] = {0x00, 0x00, 0x00};
 };
 
-class ss2kCustomCharacteristicCallbacks : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic *);
-  void onSubscribe(NimBLECharacteristic *pCharacteristic, ble_gap_conn_desc *desc, uint16_t subValue);
+class ss2kCustomCharacteristicCallbacks : public NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override;
+  void onSubscribe(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo, uint16_t subValue) override;
+  void onStatus(NimBLECharacteristic* pCharacteristic, int code) override;
 };

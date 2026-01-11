@@ -59,6 +59,11 @@
 #define FITNESSMACHINEPOWERRANGE_UUID           NimBLEUUID((uint16_t)0x2AD8)
 #define FITNESSMACHINEINCLINATIONRANGE_UUID     NimBLEUUID((uint16_t)0x2AD5)
 
+// Wattbike Service
+#define WATTBIKE_SERVICE_UUID NimBLEUUID("b4cc1223-bc02-4cae-adb9-1217ad2860d1")
+#define WATTBIKE_READ_UUID    NimBLEUUID("b4cc1224-bc02-4cae-adb9-1217ad2860d1")
+#define WATTBIKE_WRITE_UUID   NimBLEUUID("b4cc1225-bc02-4cae-adb9-1217ad2860d1")
+
 // GATT service/characteristic UUIDs for Flywheel Bike from ptx2/gymnasticon/
 #define FLYWHEEL_UART_SERVICE_UUID NimBLEUUID("6e400001-b5a3-f393-e0a9-e50e24dcca9e")
 #define FLYWHEEL_UART_RX_UUID      NimBLEUUID("6e400002-b5a3-f393-e0a9-e50e24dcca9e")
@@ -72,8 +77,8 @@
 #define ECHELON_DATA_UUID    NimBLEUUID("0bf669f4-45f2-11e7-9598-0800200c9a66")
 
 // Dummy UUID for Peloton Serial Data Interface
-#define PELOTON_DATA_UUID NimBLEUUID("00000000-0000-0000-0000-0000000000321")
-#define PELOTON_ADDRESS   NimBLEAddress("00:00:00:00:00:00:00")
+#define PELOTON_DATA_UUID NimBLEUUID("00000000-0000-0000-0000-000000000321")
+#define PELOTON_ADDRESS   NimBLEAddress("00:00:00:00:00:00", 0)
 // peloton Serial
 #define PELOTON_RQ_SIZE      4
 #define PELOTON_HEADER       0xF1

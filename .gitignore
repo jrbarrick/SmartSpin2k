@@ -3,7 +3,9 @@
 .vscode/launch.json
 .vscode/ipch
 .vscode/extensions.json
+.idea/
 test/tmp_pio_test_transport.cpp
+test/output/
 data/config.txt
 include/telegram_token.h
 Errors
@@ -13,3 +15,11 @@ SmartSpin_logfile.txt
 build/CMakeCache.txt
 *.log
 .DS_Store
+.aider*
+.env
+C/Users/
+/build
+/managed_components
+dependencies.lock
+.vscode/settings.json
+*.map
