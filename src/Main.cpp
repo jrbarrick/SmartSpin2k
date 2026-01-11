@@ -7,30 +7,35 @@
 
 #include "Main.h"
 #include "SS2KLog.h"
+#include "esp_system.h"
 #include <TMCStepper.h>
 #include <Arduino.h>
 #include <LittleFS.h>
 #include <HardwareSerial.h>
 #include "FastAccelStepper.h"
 #include "ERG_Mode.h"
+#include "Power_Table.h"
 #include "UdpAppender.h"
 #include "WebsocketAppender.h"
 #include "BLE_Custom_Characteristic.h"
+#include "BLE_Definitions.h"
 #include <Constants.h>
 #include "settings.h"
-#include "BLE_Wattbike_Service.h"
+// #include "BLE_Wattbike_Service.h"
 #include "BLE_Fitness_Machine_Service.h"
+#include "DirConManager.h"
 
 // Stepper Motor Serial
 HardwareSerial stepperSerial(2);
 TMC2209Stepper driver(&SERIAL_PORT, R_SENSE, 0b00);  // Hardware Serial
+const int LOG_INTERVAL = 1000;                       // Log interval for homing status messages
 
 // Peloton Serial
 HardwareSerial auxSerial(1);
 AuxSerialBuffer auxSerialBuffer;
 
 FastAccelStepperEngine engine = FastAccelStepperEngine();
-FastAccelStepper *stepper     = NULL;
+FastAccelStepper* stepper     = NULL;
 
 TaskHandle_t maintenanceLoopTask;
 
@@ -38,10 +43,11 @@ Boards boards;
 Board currentBoard;
 
 ///////////// Initialize the Config /////////////
-SS2K *ss2k                       = new SS2K;
-userParameters *userConfig       = new userParameters;
-RuntimeParameters *rtConfig      = new RuntimeParameters;
-physicalWorkingCapacity *userPWC = new physicalWorkingCapacity;
+ErgMode* ergMode            = new ErgMode;
+PowerTable* powerTable      = new PowerTable;
+SS2K* ss2k                  = new SS2K;
+userParameters* userConfig  = new userParameters;
+RuntimeParameters* rtConfig = new RuntimeParameters;
 
 ///////////// Log Appender /////////////
 UdpAppender udpAppender;
@@ -52,26 +58,15 @@ WebSocketAppender webSocketAppender;
 
 void SS2K::startTasks() {
   SS2K_LOG(MAIN_LOG_TAG, "Start BLE + ERG Tasks");
-  spinBLEClient.intentionalDisconnect = 0;
   setupBLE();
 }
 
 void SS2K::stopTasks() {
-  SS2K_LOG(BLE_CLIENT_LOG_TAG, "Shutting Down all BLE services");
-  spinBLEClient.reconnectTries        = 0;
-  spinBLEClient.intentionalDisconnect = NUM_BLE_DEVICES;
-  if (NimBLEDevice::getInitialized()) {
-    NimBLEDevice::deinit();
-    ss2k->stopTasks();
-  }
-  SS2K_LOG(MAIN_LOG_TAG, "Stop BLE + ERG Tasks");
-  if (BLEClientTask != NULL) {
-    vTaskDelete(BLEClientTask);
-    BLEClientTask = NULL;
-  }
+  // In favor of stopping the tasks, BLE communications loop just disconnects all connected devices.
 }
 
-void setup() {
+extern "C" void app_main() {
+  initArduino();
   // Serial port for debugging purposes
   Serial.begin(115200);
   SS2K_LOG(MAIN_LOG_TAG, "Compiled %s%s", __DATE__, __TIME__);
@@ -93,14 +88,14 @@ void setup() {
     if (!auxSerial) {
       SS2K_LOG(MAIN_LOG_TAG, "Invalid Serial Pin Configuration");
     }
-    auxSerial.onReceive(SS2K::rxSerial, false);  // setup callback
+    auxSerial.onReceive(SS2K::rxSerial, true);  // setup callback
   }
   // Initialize LittleFS
   SS2K_LOG(MAIN_LOG_TAG, "Mounting Filesystem");
   if (!LittleFS.begin(false)) {
     SS2K_LOG(MAIN_LOG_TAG, "An Error has occurred while mounting LittleFS.");
-    LittleFS.format();                     // Format so that the settings can be saved.
-    vTaskDelay(100 / portTICK_PERIOD_MS);  // Provide some time for the format to happen.
+    LittleFS.format();  // Format so that the settings can be saved.
+    delay(100);         // Provide some time for the format to happen.
   }
 
   // Load Config
@@ -110,13 +105,12 @@ void setup() {
 
   // if we have homing data, use that instead.
   if (userConfig->getHMax() != INT32_MIN && userConfig->getHMin() != INT32_MIN) {
+    SS2K_LOG(MAIN_LOG_TAG, "Using homing data from config file.");
     spinBLEServer.spinDownFlag = 1;
   }
 
-  // load PWC for HR to Pwr Calculation
-  userPWC->loadFromLittleFS();
-  userPWC->printFile();
-  userPWC->saveToLittleFS();
+  // print littleFS free space and all file sizes on partition
+  Serial.printf("LittleFS Total Bytes:%lu, Used Bytes:%lu\n", LittleFS.totalBytes(), LittleFS.usedBytes());
 
   // Check for firmware update. It's important that this stays before BLE &
   // HTTP setup because otherwise they use too much traffic and the device
@@ -139,31 +133,44 @@ void setup() {
   ss2k->setupTMCStepperDriver();
 
   SS2K_LOG(MAIN_LOG_TAG, "Setting up cpu Tasks");
-  disableCore0WDT();  // Disable the watchdog timer on core 0 (so long stepper
-                      // moves don't cause problems)
+
+  // disableCore0WDT();  // Disable the watchdog timer on core 0 (so long stepper
+  //  moves don't cause problems)
 
   digitalWrite(LED_PIN, HIGH);
-
   // Configure and Initialize Logger
   logHandler.addAppender(&webSocketAppender);
   logHandler.addAppender(&udpAppender);
   logHandler.initialize();
-
   ss2k->startTasks();
   httpServer.start();
 
+  // Start DirCon TCP server for direct control over the bike trainer
+  SS2K_LOG(MAIN_LOG_TAG, "Starting DirCon TCP service");
+  if (DirConManager::start()) {
+    SS2K_LOG(MAIN_LOG_TAG, "DirCon TCP service started successfully");
+  } else {
+    SS2K_LOG(MAIN_LOG_TAG, "Failed to start DirCon TCP service");
+  }
+
+#ifdef TEST_PTAB4PWR
+  userConfig->setHMin(0);
+  userConfig->setHMax(27000);
+  rtConfig->setMaxStep(userConfig->getHMax());
+  rtConfig->setMinStep(userConfig->getHMin());
+  rtConfig->setHomed(true);
+  userConfig->setPTab4Pwr(true);
+  spinBLEServer.spinDownFlag = 0;
+#endif
+
   ss2k->resetIfShiftersHeld();
-  SS2K_LOG(MAIN_LOG_TAG, "Creating Shifter Interrupts");
-  // Setup Interrupts so shifters work anytime
-  attachInterrupt(digitalPinToInterrupt(currentBoard.shiftUpPin), ss2k->shiftUp, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(currentBoard.shiftDownPin), ss2k->shiftDown, CHANGE);
   digitalWrite(LED_PIN, HIGH);
 
   xTaskCreatePinnedToCore(SS2K::maintenanceLoop,     /* Task function. */
                           "maintenanceLoopFunction", /* name of task. */
                           MAIN_STACK,                /* Stack size of task */
                           NULL,                      /* parameter of the task */
-                          20,                        /* priority of the task */
+                          10,                        /* priority of the task */
                           &maintenanceLoopTask,      /* Task handle to keep track of created task */
                           1);                        /* pin task to core */
 }
@@ -172,29 +179,54 @@ void loop() {  // Delete this task so we can make one that's more memory efficie
   vTaskDelete(NULL);
 }
 
-void SS2K::maintenanceLoop(void *pvParameters) {
-  static unsigned long intervalTimer  = millis();
+void SS2K::maintenanceLoop(void* pvParameters) {
   static unsigned long intervalTimer2 = millis();
   static unsigned long rebootTimer    = millis();
-  static bool isScanning              = false;
 
   while (true) {
-    vTaskDelay(5 / portTICK_RATE_MS);
+    delay(10);
 
-    // Run what used to be in the BLECommunications Task.
-    BLECommunications();
+    // be quiet while updating via BLE
+    if (!ss2k->isUpdating) {
+      static unsigned long bleTimer = millis();
+      // 500ms
+      if ((millis() - bleTimer) > BLE_NOTIFY_DELAY) {
+        BLECommunications();
+        logHandler.writeLogs();
+        webSocketAppender.Loop();
+        bleTimer = millis();
+      }
+      // Don't do these if updating and in spindown mode.
+      if (!spinBLEServer.spinDownFlag) {
+        ss2k->moveStepper();
+        ss2k->FTMSModeShiftModifier();
+        ergMode->runERG();
+      }
+      // wattbikeService.parseNemit();
+
+      // if this hardware version has serial pins, check and process their data.
+      // only do this every AUX_SERIAL_DELAY
+      static unsigned long auxSerialTimer = millis();
+      if ((millis() - auxSerialTimer) > AUX_SERIAL_DELAY) {
+        if (currentBoard.auxSerialTxPin) {
+          ss2k->txSerial();
+        }
+        auxSerialTimer = millis();
+      }
+    }
+
+    // Handle the shifters
+    ss2k->handleShiftButtons();
+
     // send BLE notification for any userConfig values that changed.
     BLE_ss2kCustomCharacteristic::parseNemit();
     // Update Zwift Gear UI if shift happened
-    wattbikeService.parseNemit();
-    // Run What used to be in the Stepper Task.
-    ss2k->moveStepper();
-    // Run what used to be in the ERG Mode Task.
-    powerTable->runERG();
-    // Run what used to be in the WebClient Task.
+
     httpServer.webClientUpdate();
+    // Update DirCon protocol
+    DirConManager::update();
     // If we're in ERG mode, modify shift commands to inc/dec the target watts instead.
-    ss2k->FTMSModeShiftModifier();
+
     // If we have a resistance bike attached, slow down when we're close to the limits.
     if (ss2k->pelotonIsConnected && !rtConfig->getHomed() && !spinBLEServer.spinDownFlag) {
       int speed           = userConfig->getStepperSpeed();
@@ -227,19 +259,14 @@ void SS2K::maintenanceLoop(void *pvParameters) {
       ss2k->updateStepperSpeed(speed);
     }
 
-    // if this hardware version has serial pins, check and process their data.
-    if (currentBoard.auxSerialTxPin) {
-      ss2k->txSerial();
-    }
-
     // Handle flag set for rebooting
     if (ss2k->rebootFlag) {
       static bool _loopOnce = false;
-      vTaskDelay(1000 / portTICK_RATE_MS);
+      delay(1000);
       // Let the main task loop complete once before rebooting
       if (_loopOnce) {
         // Important to keep this delay high in order to allow coms to finish.
-        vTaskDelay(1000 / portTICK_RATE_MS);
+        delay(1000);
         ESP.restart();
       }
       _loopOnce = true;
@@ -259,28 +286,19 @@ void SS2K::maintenanceLoop(void *pvParameters) {
     if (ss2k->saveFlag) {
       ss2k->saveFlag = false;
       userConfig->saveToLittleFS();
-      userPWC->saveToLittleFS();
-    }
-
-    // Things to do every one seconds
-    if ((millis() - intervalTimer) > 1003) {
-      logHandler.writeLogs();
-      webSocketAppender.Loop();
-      intervalTimer = millis();
     }
 
     // Things to do every 6 seconds
     if ((millis() - intervalTimer2) > 6007) {
       // reboot every half hour if not in use.
-      static int _oldHR               = 0;
-      static int _oldWatts            = 0;
-      static double _oldTargetIncline = 0;
-      if (_oldHR == rtConfig->hr.getValue() && _oldWatts == rtConfig->watts.getValue() && _oldTargetIncline == rtConfig->getTargetIncline() &&
-          NimBLEDevice::getServer()->getConnectedCount() == 0) {
+      static int _oldHR              = 0;
+      static int _oldWatts           = 0;
+      static float _oldTargetIncline = 0.0f;
+      if (_oldHR == rtConfig->hr.getValue() && _oldWatts == rtConfig->watts.getValue() && _oldTargetIncline == rtConfig->getTargetIncline()) {
         // Inactivity detected
         if (((millis() - rebootTimer) > 1800000)) {
           // Timer expired
-          SS2K_LOGW(MAIN_LOG_TAG, "Rebooting due to inactivity.");
+          SS2K_LOG(MAIN_LOG_TAG, "Rebooting due to inactivity.");
           ss2k->rebootFlag = true;
           logHandler.writeLogs();
           webSocketAppender.Loop();
@@ -295,10 +313,18 @@ void SS2K::maintenanceLoop(void *pvParameters) {
       }
 
 #ifdef DEBUG_STACK
-      Serial.printf("Main Task: %d \n", uxTaskGetStackHighWaterMark(maintenanceLoopTask));
-      Serial.printf("Free Heap: %d \n", ESP.getFreeHeap());
-      Serial.printf("Best Blok: %d \n", heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+      if (!ss2k->isUpdating) {
+        SS2K_LOG(MAIN_LOG_TAG, "Main Task: %d", uxTaskGetStackHighWaterMark(maintenanceLoopTask));
+        SS2K_LOG(MAIN_LOG_TAG, "BLEClient: %d", uxTaskGetStackHighWaterMark(BLEClientTask));
+        SS2K_LOG(MAIN_LOG_TAG, "Min Heap: %d", esp_get_minimum_free_heap_size());
+        SS2K_LOG(MAIN_LOG_TAG, "Free Heap: %d", esp_get_free_heap_size());
+        SS2K_LOG(MAIN_LOG_TAG, "Best Block: %d", heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+      }
 #endif  // DEBUG_STACK
+      // Log userParameters
+      SS2K_LOG(MAIN_LOG_TAG, "PM Con %d, CAD con %d, HRM Con %d, W %d, Cad %d, HR %d, Gear %d, Res %d, Current Pos %d, Target Pos %d", spinBLEClient.connectedPM,
+               spinBLEClient.connectedCD, spinBLEClient.connectedHRM, rtConfig->watts.getValue(), rtConfig->cad.getValue(), rtConfig->hr.getValue(), rtConfig->getShifterPosition(),
+               rtConfig->resistance.getValue(), ss2k->getCurrentPosition(), ss2k->getTargetPosition());
 
       intervalTimer2 = millis();
     }
@@ -308,9 +334,6 @@ void SS2K::maintenanceLoop(void *pvParameters) {
 #endif  // UNIT_TEST
 
 void SS2K::FTMSModeShiftModifier() {
-  if (spinBLEServer.spinDownFlag) {
-    return;
-  }
   int shiftDelta = rtConfig->getShifterPosition() - ss2k->lastShifterPosition;
   if (shiftDelta) {  // Shift detected
     switch (rtConfig->getFTMSMode()) {
@@ -326,7 +349,7 @@ void SS2K::FTMSModeShiftModifier() {
         SS2K_LOG(MAIN_LOG_TAG, "ERG Shift. New Target: %dw", rtConfig->watts.getTarget());
 // Format output for FTMS passthrough
 #ifndef INTERNAL_ERG_4EXT_FTMS
-        int adjustedTarget         = rtConfig->watts.getTarget() / userConfig->getPowerCorrectionFactor();
+        int adjustedTarget         = round(rtConfig->watts.getTarget() / userConfig->getPowerCorrectionFactor());
         const uint8_t translated[] = {FitnessMachineControlPointProcedure::SetTargetPower, (uint8_t)(adjustedTarget & 0xff), (uint8_t)(adjustedTarget >> 8)};
         spinBLEClient.FTMSControlPointWrite(translated, 3);
 #endif
@@ -354,11 +377,13 @@ void SS2K::FTMSModeShiftModifier() {
 
       default:  // Sim Mode
       {
-        SS2K_LOG(MAIN_LOG_TAG, "Shift %+d pos %d tgt %d min %d max %d r_min %d r_max %d", shiftDelta, rtConfig->getShifterPosition(), ss2k->targetPosition, rtConfig->getMinStep(),
-                 rtConfig->getMaxStep(), rtConfig->getMinResistance(), rtConfig->getMaxResistance());
-
-        if (((ss2k->targetPosition + shiftDelta * userConfig->getShiftStep()) < rtConfig->getMinStep()) ||
-            ((ss2k->targetPosition + shiftDelta * userConfig->getShiftStep()) > rtConfig->getMaxStep())) {
+        SS2K_LOG(MAIN_LOG_TAG, "Shift %+d pos %d tgt %d min %d max %d r_min %d r_max %d", shiftDelta, rtConfig->getShifterPosition(), ss2k->getTargetPosition(),
+                 rtConfig->getMinStep(), rtConfig->getMaxStep(), rtConfig->getMinResistance(), rtConfig->getMaxResistance());
+        // Block Shifts further out of bounds
+        if (((ss2k->targetPosition + shiftDelta * userConfig->getShiftStep()) < rtConfig->getMinStep()) && (shiftDelta < 0)) {
+          SS2K_LOG(MAIN_LOG_TAG, "Shift Blocked by stepper limits.");
+          rtConfig->setShifterPosition(ss2k->lastShifterPosition);
+        } else if ((ss2k->targetPosition + shiftDelta * userConfig->getShiftStep()) > rtConfig->getMaxStep() && (shiftDelta > 0)) {
           SS2K_LOG(MAIN_LOG_TAG, "Shift Blocked by stepper limits.");
           rtConfig->setShifterPosition(ss2k->lastShifterPosition);
         } else if (rtConfig->getHomed()) {
@@ -385,23 +410,21 @@ void SS2K::FTMSModeShiftModifier() {
 
 void SS2K::restartWifi() {
   httpServer.stop();
-  vTaskDelay(100 / portTICK_RATE_MS);
+  delay(100);
   stopWifi();
-  vTaskDelay(100 / portTICK_RATE_MS);
+  delay(100);
   startWifi();
   httpServer.start();
 }
 
 void SS2K::moveStepper() {
-  if (spinBLEServer.spinDownFlag) {
-    return;
-  }
   bool _stepperDir = userConfig->getStepperDir();
   if (stepper) {
     ss2k->stepperIsRunning = stepper->isRunning();
     ss2k->currentPosition  = stepper->getCurrentPosition();
     if (!ss2k->externalControl) {
       if ((rtConfig->getFTMSMode() == FitnessMachineControlPointProcedure::SetTargetPower)) {
+#ifdef ERG_GUARDRAILS
         // don't drive lower out of bounds. This is a final test that should never happen.
         if ((stepper->getCurrentPosition() > rtConfig->getTargetIncline()) && (rtConfig->watts.getValue() < rtConfig->watts.getTarget())) {
           rtConfig->setTargetIncline(stepper->getCurrentPosition() + 1);
@@ -410,10 +433,10 @@ void SS2K::moveStepper() {
         if ((stepper->getCurrentPosition() < rtConfig->getTargetIncline()) && (rtConfig->watts.getValue() > rtConfig->watts.getTarget())) {
           rtConfig->setTargetIncline(stepper->getCurrentPosition() - 1);
         }
+#endif
         ss2k->targetPosition = rtConfig->getTargetIncline();
-      } else if (rtConfig->getFTMSMode() == FitnessMachineControlPointProcedure::SetTargetResistanceLevel) {
-        rtConfig->setTargetIncline(ss2k->currentPosition + ((rtConfig->resistance.getTarget() - rtConfig->resistance.getValue()) * 20));
-        ss2k->targetPosition = rtConfig->getTargetIncline();
+      } else if ((rtConfig->getFTMSMode() == FitnessMachineControlPointProcedure::SetTargetResistanceLevel)) {
+        ss2k->_resistanceMove();
       } else {
         // Simulation Mode
         ss2k->targetPosition = rtConfig->getShifterPosition() * userConfig->getShiftStep();
@@ -435,35 +458,48 @@ void SS2K::moveStepper() {
       ss2k->syncMode = false;
     }
 
+    bool _closeToTarget = (abs(stepper->getCurrentPosition() - rtConfig->getMinStep()) <= (userConfig->getShiftStep() / 2)) ||
+                          (abs(stepper->getCurrentPosition() - rtConfig->getMaxStep()) <= (userConfig->getShiftStep() / 2));
+
     if (ss2k->pelotonIsConnected && !rtConfig->getHomed()) {
-      if ((rtConfig->resistance.getValue() > rtConfig->getMinResistance()) && (rtConfig->resistance.getValue() < rtConfig->getMaxResistance())) {
-        stepper->moveTo(ss2k->targetPosition);
-      } else if (rtConfig->resistance.getValue() <= rtConfig->getMinResistance()) {  // Limit Stepper to Min Resistance
-        if (rtConfig->resistance.getValue() != rtConfig->getMinResistance()) {
-          stepper->moveTo(stepper->getCurrentPosition() + 20);
-        }
-        // Let the user Shift Out of this Position
-        if (ss2k->targetPosition > stepper->getCurrentPosition()) {
-          stepper->moveTo(ss2k->targetPosition);
-        }
-      } else {  // Limit Stepper to Max Resistance
-        if (rtConfig->resistance.getValue() != rtConfig->getMaxResistance()) {
-          stepper->moveTo(stepper->getCurrentPosition() - 20);
-        }
-        // Let the user Shift Out of this Position
-        if (ss2k->targetPosition < stepper->getCurrentPosition()) {
-          stepper->moveTo(ss2k->targetPosition);
+      // Peloton + not homed: gently walk away from the edges unless the user is actively shifting past them
+      if (rtConfig->resistance.getValue() < rtConfig->getMinResistance()) {  // Below allowed resistance
+        // Nudge upward unless the user already asked to move higher
+        if (ss2k->targetPosition <= ss2k->getCurrentPosition()) {
+          ss2k->targetPosition = ss2k->getCurrentPosition() + 20;
         }
       }
-    } else {  // Normal move code for non-Peloton
-      if ((ss2k->targetPosition >= rtConfig->getMinStep()) && (ss2k->targetPosition <= rtConfig->getMaxStep())) {
-        stepper->moveTo(ss2k->targetPosition);
-      } else if (ss2k->targetPosition <= rtConfig->getMinStep()) {  // Limit Stepper to Min Position
-        stepper->moveTo(rtConfig->getMinStep() + 1);
-      } else {  // Limit Stepper to Max Position
-        stepper->moveTo(rtConfig->getMaxStep() - 1);
+      if (rtConfig->resistance.getValue() > rtConfig->getMaxResistance()) {
+        // Nudge downward unless the user already asked to move lower
+        if (ss2k->targetPosition > ss2k->getCurrentPosition()) {
+          ss2k->targetPosition = ss2k->getCurrentPosition() - 20;
+        }
+      }
+    } else if (!rtConfig->getHomed()) {  // Not homed: keep target inside the provisional range and learn bounds when power looks valid
+      // Flag when current position is within half a shift step of either bound
+      bool _closeToTarget = (abs(ss2k->getCurrentPosition() - rtConfig->getMinStep()) <= (userConfig->getShiftStep() / 2)) ||
+                            (abs(ss2k->getCurrentPosition() - rtConfig->getMaxStep()) <= (userConfig->getShiftStep() / 2));
+
+      if (ss2k->targetPosition < rtConfig->getMinStep()) {
+        // if (_closeToTarget && rtConfig->cad.getValue() > 0 && rtConfig->watts.getValue() > userConfig->getMinWatts() + POWERTABLE_WATT_INCREMENT) {
+        //   rtConfig->setMinStep(ss2k->targetPosition);  // Learn a tighter min bound from real effort
+        // }
+        ss2k->targetPosition = rtConfig->getMinStep() + 1;
+      } else if (ss2k->targetPosition > rtConfig->getMaxStep()) {
+        // if (_closeToTarget && rtConfig->cad.getValue() > 0 && rtConfig->watts.getValue() < userConfig->getMaxWatts() - POWERTABLE_WATT_INCREMENT) {
+        //   rtConfig->setMaxStep(ss2k->targetPosition);  // Learn a tighter max bound from real effort
+        // }
+        ss2k->targetPosition = rtConfig->getMaxStep() - 1;
+      }
+    } else {  // Homed: simple clamp to the known good range
+      if (ss2k->targetPosition < rtConfig->getMinStep()) {
+        ss2k->targetPosition = rtConfig->getMinStep() + 1;
+      } else if (ss2k->targetPosition > rtConfig->getMaxStep()) {
+        ss2k->targetPosition = rtConfig->getMaxStep() - 1;
       }
     }
+
+    stepper->moveTo(ss2k->targetPosition);
 
     if (rtConfig->cad.getValue() > 1) {
       stepper->enableOutputs();
@@ -475,45 +511,82 @@ void SS2K::moveStepper() {
     if (_stepperDir != userConfig->getStepperDir()) {  // User changed the config direction of the stepper wires
       _stepperDir = userConfig->getStepperDir();
       while (stepper->isRunning()) {  // Wait until the motor stops running
-        vTaskDelay(100 / portTICK_PERIOD_MS);
+        delay(100);
       }
       stepper->setDirectionPin(currentBoard.dirPin, _stepperDir);
     }
   }
 }
 
-bool IRAM_ATTR SS2K::deBounce() {
-  if ((millis() - lastDebounceTime) > debounceDelay) {  // <----------------This should be assigned it's own task and just switch a global bool whatever the reading is at, it's
-                                                        // been there for longer than the debounce delay, so take it as the actual current state: if the button state has changed:
-    lastDebounceTime = millis();
-    return true;
+void SS2K::_resistanceMove() {
+  // Get absolute position for a given resistance percent (0-100)
+  if (rtConfig->resistance.getSimulate()) {
+    int32_t minPos, maxPos;
+    bool usePwr = false;
+    if (userConfig->getHMin() != INT32_MIN && userConfig->getHMax() != INT32_MIN) {
+      minPos = userConfig->getHMin();
+      maxPos = userConfig->getHMax();
+    } else if (rtConfig->getMinStep() != -DEFAULT_STEPPER_TRAVEL && rtConfig->getMaxStep() != DEFAULT_STEPPER_TRAVEL) {
+      minPos = rtConfig->getMinStep();
+      maxPos = rtConfig->getMaxStep();
+    } else {  // No good position information. Fallback to using ERG
+      minPos = userConfig->getMinWatts();
+      maxPos = userConfig->getMaxWatts();
+      usePwr = true;
+    }
+    int resistancePercent = rtConfig->resistance.getTarget();
+    if (resistancePercent < 0) resistancePercent = 0;
+    if (resistancePercent > 100) resistancePercent = 100;
+    int64_t span = (int64_t)maxPos - (int64_t)minPos;
+    int32_t pos  = minPos + (int32_t)round((span * resistancePercent) / 100.0f);
+    if (usePwr) {  // fallback to using ERG
+      rtConfig->watts.setTarget(pos);
+      rtConfig->setFTMSMode(FitnessMachineControlPointProcedure::SetTargetPower);
+      return;
+    }
+    rtConfig->setTargetIncline(pos);
+  } else {
+    int actualDelta = rtConfig->resistance.getTarget() - rtConfig->resistance.getValue();
+    int direction   = (actualDelta > 0) ? 1 : -1;
+    if (abs(actualDelta) > 20 - userConfig->getERGSensitivity()) {
+      rtConfig->setTargetIncline(ss2k->getCurrentPosition() + userConfig->getShiftStep() * direction);
+    } else if (abs(actualDelta) > 1) {
+      rtConfig->setTargetIncline(ss2k->getCurrentPosition() + actualDelta * 3 + (userConfig->getERGSensitivity() * direction));
+    } else {
+      rtConfig->setTargetIncline(ss2k->getCurrentPosition() + actualDelta + (userConfig->getERGSensitivity() * direction));
+    }
   }
-
-  return false;
+  ss2k->targetPosition = rtConfig->getTargetIncline();
 }
 
-///////////// Interrupt Functions /////////////
-void IRAM_ATTR SS2K::shiftUp() {  // Handle the shift up interrupt IRAM_ATTR is to keep the interrupt code in ram always
-  if (ss2k->deBounce()) {
-    if (!digitalRead(currentBoard.shiftUpPin)) {  // double checking to make sure the interrupt wasn't triggered by emf
+void SS2K::handleShiftButtons() {
+  int upButtonIsPressed   = !digitalRead(currentBoard.shiftUpPin);
+  int downButtonIsPressed = !digitalRead(currentBoard.shiftDownPin);
+
+  // --- UP Button State Machine ---
+  if (upButtonIsPressed && ss2k->upButtonState == RELEASED) {
+    if (millis() - ss2k->lastDebounceTime > DEBOUNCE_DELAY) {
+      // It's a valid press, take action!
       rtConfig->setShifterPosition(rtConfig->getShifterPosition() - 1 + userConfig->getShifterDir() * 2);
-      // Stop homing initiation
-      spinBLEServer.spinDownFlag = 0;
-    } else {
-      ss2k->lastDebounceTime = 0;
-    }  // Probably Triggered by EMF, reset the debounce
-  }
-}
+      ss2k->lastDebounceTime = millis();
+    }
+    ss2k->upButtonState = PRESSED;
 
-void IRAM_ATTR SS2K::shiftDown() {  // Handle the shift down interrupt
-  if (ss2k->deBounce()) {
-    if (!digitalRead(currentBoard.shiftDownPin)) {  // double checking to make sure the interrupt wasn't triggered by emf
+  } else if (!upButtonIsPressed && ss2k->upButtonState == PRESSED) {
+    // The button was pressed, but now it's not. Update the state.
+    ss2k->upButtonState = RELEASED;
+  }
+
+  // --- DOWN Button State Machine ---
+  if (downButtonIsPressed && ss2k->downButtonState == RELEASED) {
+    if (millis() - ss2k->lastDebounceTime > DEBOUNCE_DELAY) {
       rtConfig->setShifterPosition(rtConfig->getShifterPosition() + 1 - userConfig->getShifterDir() * 2);
-      // Stop homing initiation
-      spinBLEServer.spinDownFlag = 0;
-    } else {
-      ss2k->lastDebounceTime = 0;
-    }  // Probably Triggered by EMF, reset the debounce
+      ss2k->lastDebounceTime = millis();
+    }
+    ss2k->downButtonState = PRESSED;
+
+  } else if (!downButtonIsPressed && ss2k->downButtonState == PRESSED) {
+    ss2k->downButtonState = RELEASED;
   }
 }
 
@@ -522,15 +595,15 @@ void SS2K::resetIfShiftersHeld() {
     SS2K_LOG(MAIN_LOG_TAG, "Resetting to defaults via shifter buttons.");
     for (int x = 0; x < 10; x++) {  // blink fast to acknowledge
       digitalWrite(LED_PIN, HIGH);
-      vTaskDelay(200 / portTICK_PERIOD_MS);
+      delay(200);
       digitalWrite(LED_PIN, LOW);
     }
     for (int i = 0; i < 20; i++) {
       LittleFS.format();
       userConfig->setDefaults();
-      vTaskDelay(200 / portTICK_PERIOD_MS);
+      delay(200);
       userConfig->saveToLittleFS();
-      vTaskDelay(200 / portTICK_PERIOD_MS);
+      delay(200);
     }
     ESP.restart();
   }
@@ -554,111 +627,254 @@ void SS2K::setupTMCStepperDriver(bool reset) {
   driver.pdn_disable(true);       // Use PDN pin to enable UART communication instead of grounding signal
   driver.mstep_reg_select(true);  // Use register instead of ms1&ms2 pins for microstep selection
   driver.microsteps(4);           // Set microsteps to 1/8th
-  driver.iholddelay(10);          // Controls the number of clock cycles for motor power down after standstill is detected
-  driver.TPOWERDOWN(128);         // delay until hold current
+  driver.iholddelay(5);           // Controls the number of clock cycles for motor power down after standstill is detected
+  driver.TPOWERDOWN(16);          // delay until hold current (0-255). 255 = 5.6s, 2 is minimum for StealthChop.
   driver.toff(5);                 // needs >0 for driver enable. 1-15 controls duration of slow decay phase of pwm.
   this->updateStealthChop();
-  driver.irun(currentBoard.pwrScaler);
-  driver.ihold((uint8_t)(currentBoard.pwrScaler * .1));  // hold current % 0-DRIVER_MAX_PWR_SCALER
   this->updateStepperSpeed();
   this->updateStepperPower();
   this->setCurrentPosition(stepper->getCurrentPosition());
 }
 
-void SS2K::goHome(bool bothDirections) {
-  if (stepper) {
-    if (currentBoard.name != r2_NAME) {
-      SS2K_LOG(MAIN_LOG_TAG, "Board Doesn't support homing");
-      fitnessMachineService.spinDown(0x02);
+#define HOME_TIMEOUT 30000
+/**
+ * @brief Private helper function to find a single end stop using StallGuard.
+ * @param moveForward True to move forward to find the max end stop, false to move backward for the min.
+ */
+void SS2K::_findEndStop(bool moveForward) {
+  unsigned long timeoutTimer   = millis();
+  int threshold                = 0;
+  long totalSgResult           = 0;
+  const int SAMPLES_TO_AVERAGE = 16;  // Take 16 samples for a stable average
+
+  // --- SETUP DRIVER FOR SENSORLESS HOMING ---
+  // Use very low power for sensitive stall detection
+  updateStepperPower(userConfig->getStepperPower() * PWR_SCALER_FOR_HOMING);  // Use reduced power for homing. This prevents a stuck knob, we can free it using higher power.
+  updateStepperSpeed(1500);                                                   // Use a slow-medium speed for homing
+
+  // Start the motor moving in the specified direction
+  if (moveForward) {
+    stepper->runForward();
+  } else {
+    stepper->runBackward();
+  }
+
+  // Wait for the motor to reach a stable speed before sampling
+  delay(300);
+
+  // Take multiple samples of SG_RESULT and average them
+  for (int i = 0; i < SAMPLES_TO_AVERAGE; i++) {
+    totalSgResult += driver.SG_RESULT();
+    delay(10);  // Small delay between samples
+  }
+  threshold = round(totalSgResult / (float)SAMPLES_TO_AVERAGE);
+
+  SS2K_LOG(MAIN_LOG_TAG, "Homing %s. Stable Threshold: %d, Sensitivity: %d", moveForward ? "forward (max)" : "backward (min)", threshold, userConfig->getHomingSensitivity());
+
+  unsigned long lastLogTime = millis() - LOG_INTERVAL;  // Initialize last log time
+  int currentSgResult       = 0;
+  while ((millis() - timeoutTimer) < HOME_TIMEOUT) {
+    delay(5);
+    // Allow user to abort the homing process with a shift
+    if (rtConfig->getShifterPosition() != ss2k->lastShifterPosition) {
+      SS2K_LOG(MAIN_LOG_TAG, "Homing aborted by user.");
+      stepper->forceStop();
+      setupTMCStepperDriver(true);  // Restore normal driver settings
       return;
     }
-    SS2K_LOG(MAIN_LOG_TAG, "Homing...");
-    SS2K_LOG(MAIN_LOG_TAG, "Updating driver...");
-    fitnessMachineService.spinDown(0x01);
-    updateStepperPower(userConfig->getStepperPower() * .2);
-    vTaskDelay(50 / portTICK_PERIOD_MS);
-    driver.irun(0x02);  // low power
-    vTaskDelay(50 / portTICK_PERIOD_MS);
-    driver.ihold(0x01);
-    vTaskDelay(50 / portTICK_PERIOD_MS);
-    int threshold = 0;
-    bool stalled  = false;
-    // Back off limit in case we are alread here.
-    stepper->move(userConfig->getShiftStep(), true);
-    this->updateStepperSpeed(1500);
-    vTaskDelay(500 / portTICK_PERIOD_MS);
-    stepper->runBackward();
-    vTaskDelay(250 / portTICK_PERIOD_MS);
-    threshold = driver.SG_RESULT();
-    Serial.printf("%d ", driver.SG_RESULT());
-    vTaskDelay(300 / portTICK_PERIOD_MS);
-    fitnessMachineService.spinDown(0x04);
-    while (!stalled) {
-      if (abs(rtConfig->getShifterPosition() - ss2k->lastShifterPosition)) {  // let the user abort with the shift button.
-        userConfig->setHMin(INT32_MIN);
-        userConfig->setHMax(INT32_MIN);
-        return;
-      }
-      stalled = (driver.SG_RESULT() < threshold - userConfig->getHomingSensitivity());
+
+    currentSgResult = driver.SG_RESULT();
+    // if zero detected, wait 10ms and sample again.
+    if (currentSgResult == 0) {
+      delay(10);
+      currentSgResult = driver.SG_RESULT();
     }
-    stepper->forceStop();
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    stepper->moveTo(stepper->getCurrentPosition() + userConfig->getShiftStep());
-    while (stepper->isRunning()) {
-      vTaskDelay(10 / portTICK_PERIOD_MS);
+
+    // Periodically log the status for tuning
+    if (millis() - lastLogTime > LOG_INTERVAL) {
+      SS2K_LOG(MAIN_LOG_TAG, "Homing... Current SG: %d, Baseline: %d, Target: < %d", currentSgResult, threshold, threshold - userConfig->getHomingSensitivity());
+      lastLogTime = millis();
+      if (moveForward) fitnessMachineService.spinDown(FitnessMachineStatus::SpinDown_StopPedaling);
     }
-    stepper->setCurrentPosition((int32_t)0);
-    ss2k->setTargetPosition(0);
-    rtConfig->setMinStep(0);
-    SS2K_LOG(MAIN_LOG_TAG, "Min Position found: %d.", rtConfig->getMinStep());
-    stalled = false;
-    fitnessMachineService.spinDown(0x02);
-    if (bothDirections) {
-      // Back off limit in case we are alread here.
-      this->updateStepperSpeed(1500);
-      vTaskDelay(500 / portTICK_PERIOD_MS);
-      stepper->runForward();
-      vTaskDelay(1000 / portTICK_PERIOD_MS);  // wait until stable
-      threshold = driver.SG_RESULT();         // take reading
-      Serial.printf("%d ", driver.SG_RESULT());
-      vTaskDelay(250 / portTICK_PERIOD_MS);
-      while (!stalled) {
-        if (abs(rtConfig->getShifterPosition() - ss2k->lastShifterPosition)) {  // let the user abort with the shift button.
-          userConfig->setHMin(INT32_MIN);
-          userConfig->setHMax(INT32_MIN);
-          return;
-        }
-        stalled = (driver.SG_RESULT() < threshold - userConfig->getHomingSensitivity());
-      }
+
+    // Check for the stall condition
+    if (currentSgResult < (threshold - userConfig->getHomingSensitivity())) {
       stepper->forceStop();
-      fitnessMachineService.spinDown(0x02);
-      vTaskDelay(500 / portTICK_PERIOD_MS);
-      rtConfig->setMaxStep(stepper->getCurrentPosition() - 200);
-      SS2K_LOG(MAIN_LOG_TAG, "Max Position found: %d.", rtConfig->getMaxStep());
-      this->updateStepperSpeed();
-      stepper->moveTo(0, true);
+      SS2K_LOG(MAIN_LOG_TAG, "Stall detected! SG dropped to %d. Threshold: %d", currentSgResult, threshold - userConfig->getHomingSensitivity());
+      delay(100);                   // Let motor settle
+      setupTMCStepperDriver(true);  // Restore normal driver settings
+      return;
     }
   }
-  fitnessMachineService.spinDown(0x02);
-  // Start Saving Settings
+  // If we get here, the loop timed out
+  stepper->forceStop();
+  SS2K_LOG(MAIN_LOG_TAG, "Homing timed out!");
+  setupTMCStepperDriver(true);  // Restore normal driver settings
+}
+
+void SS2K::_findFTMSHome(bool bothDirections) {
+  SS2K_LOG(MAIN_LOG_TAG, "Starting FTMS Homing...");
+  unsigned long timer       = millis();
+  unsigned long lastLogTime = 0;
+  int lastResistance        = 0;
+  int i                     = 0;
+  const int iMax            = 600;
+
+  auto runHomingSweep = [&](int targetResistance, const char* logTemplate, bool notifySpinDown) {
+    timer                   = millis();
+    i                       = 0;
+    int32_t lastPosition    = ss2k->getCurrentPosition();
+    const int32_t minTravel = userConfig->getShiftStep();
+    while ((rtConfig->resistance.getValue() != targetResistance) && ((i < iMax) || (abs(ss2k->getCurrentPosition() - lastPosition) < minTravel))) {
+      if (millis() - timer > HOME_TIMEOUT) {
+        SS2K_LOG(MAIN_LOG_TAG, "FTMS Homing timed out!");
+        setupTMCStepperDriver(true);  // Restore normal driver settings
+        return;
+      }
+      if (rtConfig->getShifterPosition() != ss2k->lastShifterPosition) {
+        SS2K_LOG(MAIN_LOG_TAG, "FTMS Homing aborted by user.");
+        stepper->forceStop();
+        setupTMCStepperDriver(true);  // Restore normal driver settings
+        return;
+      }
+      ss2k->setCurrentPosition(stepper->getCurrentPosition());
+      rtConfig->resistance.setTarget(targetResistance);
+      rtConfig->setTargetIncline(ss2k->getCurrentPosition());
+      ss2k->_resistanceMove();
+      stepper->moveTo(ss2k->targetPosition);
+      delay(5);
+      if (lastResistance != rtConfig->resistance.getValue()) {
+        lastResistance = rtConfig->resistance.getValue();
+        lastPosition   = ss2k->getCurrentPosition();
+        i              = 0;
+      }
+      if (logTemplate && (millis() - lastLogTime > LOG_INTERVAL)) {
+        SS2K_LOG(MAIN_LOG_TAG, logTemplate, rtConfig->resistance.getValue(), targetResistance);
+        if (notifySpinDown) {
+          fitnessMachineService.spinDown(FitnessMachineStatus::SpinDown_StopPedaling);
+        }
+        lastLogTime = millis();
+      }
+      i++;
+    }
+
+    bool reachedTarget   = (rtConfig->resistance.getValue() == targetResistance);
+    int32_t travelDelta  = abs(ss2k->getCurrentPosition() - lastPosition);
+    bool iterExceeded    = (i >= iMax);
+    bool travelSatisfied = (travelDelta >= minTravel);
+    SS2K_LOG(MAIN_LOG_TAG, "FTMS Homing sweep exit: target=%d current=%d reached=%s iter=%d/%d travelΔ=%d minTravel=%d travelMet=%s", targetResistance,
+             rtConfig->resistance.getValue(), reachedTarget ? "true" : "false", i, iMax, travelDelta, minTravel, travelSatisfied ? "true" : "false");
+  };
+
+  ss2k->updateStepperSpeed(1500);  // Use a slow-medium speed for homing
+
+  // first back off of the stop if we're already there
+  int midTarget = round((rtConfig->resistance.getMax() - rtConfig->resistance.getMin()) / 4.0f);
+  rtConfig->resistance.setTarget(midTarget);
+  runHomingSweep(midTarget, nullptr, false);
+  runHomingSweep(rtConfig->resistance.getMin(), "Homing to Min Resistance... Current: %d, Target: %d", false);
+  lastResistance = rtConfig->resistance.getValue();
+
+  // log found positions
+  SS2K_LOG(MAIN_LOG_TAG, "Found Min Resistance Position: %d", rtConfig->resistance.getValue());
+  stepper->setCurrentPosition(0);
+  ss2k->setCurrentPosition(0);
+  ss2k->setTargetPosition(0);
+  rtConfig->setTargetIncline(0);
+  rtConfig->setMinStep(0);
+  if (bothDirections) {
+    runHomingSweep(rtConfig->resistance.getMax(), "Homing to Max Resistance... Current: %d, Target: %d", true);
+    rtConfig->setMaxStep(stepper->getCurrentPosition());
+    userConfig->setHMin(rtConfig->getMinStep());
+    userConfig->setHMax(rtConfig->getMaxStep());
+    SS2K_LOG(MAIN_LOG_TAG, "Found Max Resistance Position: %d", rtConfig->resistance.getValue());
+  }
+  setupTMCStepperDriver(true);
+  rtConfig->setShifterPosition(0);
+  ss2k->setTargetPosition(0);
+  rtConfig->setTargetIncline(0);
+  stepper->moveTo(0);
+  rtConfig->setMaxStep(userConfig->getHMax());  // Ensure it's set from config if not found
+  rtConfig->setHomed(true);
+  userConfig->saveToLittleFS();
+}
+
+void SS2K::goHome(bool bothDirections) {
+  SS2K_LOG(MAIN_LOG_TAG, "Starting homing procedure...");
+  if (bothDirections) {
+    fitnessMachineService.spinDown(FitnessMachineStatus::SpinDown_SpinDownRequested);
+    if (!userConfig->getPTab4Pwr()) {
+      // clean slate for homing
+      powerTable->reset();
+    }
+  }
+
+  // if we're using real resistance from a FTMS bike, find those values for the reported min and max resistance instead of using hard stops.
+  if (!rtConfig->resistance.getSimulate() && userConfig->getConnectedPowerMeter() != NONE && rtConfig->resistance.getMax() > 0) {
+    ss2k->_findFTMSHome(bothDirections);
+    if (rtConfig->getHomed()) {
+      fitnessMachineService.spinDown(FitnessMachineStatus::SpinDown_Success);
+      return;
+    }
+  }
+
+  if (!stepper || currentBoard.name != r2_NAME) {
+    SS2K_LOG(MAIN_LOG_TAG, "Homing not supported or stepper not initialized.");
+    fitnessMachineService.spinDown(FitnessMachineStatus::SpinDown_Error);
+    return;
+  }
+
+  // --- FIND MIN END STOP (Mandatory) ---
+  // First, back off the limit in case we are already there
+  stepper->move((userConfig->getShiftStep() > DEFAULT_SHIFT_STEP ? userConfig->getShiftStep() : DEFAULT_SHIFT_STEP), true);  // Move away from the min-stop
+  ss2k->_findEndStop(false);
+  stepper->move((userConfig->getShiftStep() > DEFAULT_SHIFT_STEP ? userConfig->getShiftStep() : DEFAULT_SHIFT_STEP), true);  // Back off the end stop slightly
+  ss2k->_findEndStop(false);                                                                                                 // Double tap to ensure we get a good reading
+  stepper->move(userConfig->getShiftStep(), true);                                                                           // Back off the end stop slightly
+  stepper->setCurrentPosition(0);
+  ss2k->setTargetPosition(0);
+  rtConfig->setMinStep(0);
+  SS2K_LOG(MAIN_LOG_TAG, "Min position found and set to 0.");
+
+  // --- FIND MAX END STOP (Optional) ---
+  if (bothDirections) {
+    fitnessMachineService.spinDown(FitnessMachineStatus::SpinDown_StopPedaling);
+    ss2k->_findEndStop(true);
+    stepper->move(-(userConfig->getShiftStep() > DEFAULT_SHIFT_STEP ? userConfig->getShiftStep() : DEFAULT_SHIFT_STEP), true);
+    ss2k->_findEndStop(true);  // Double tap to ensure we get a good reading
+    rtConfig->setMaxStep(stepper->getCurrentPosition() - userConfig->getShiftStep());
+    userConfig->setHMax(rtConfig->getMaxStep());
+    SS2K_LOG(MAIN_LOG_TAG, "Max Position found: %d", rtConfig->getMaxStep());
+  }
+
+  rtConfig->setHomed(true);
+  setupTMCStepperDriver(true);  // Restore normal driver settings
+  rtConfig->setShifterPosition(0);
+  ss2k->setTargetPosition(0);
+  stepper->moveTo(0);
+  if (bothDirections) fitnessMachineService.spinDown(FitnessMachineStatus::SpinDown_Success);
+
+  // --- FINALIZE AND SAVE ---
+  rtConfig->setMaxStep(userConfig->getHMax());  // Ensure max step is set from config if not found
   if (bothDirections) {
     userConfig->setHMin(rtConfig->getMinStep());
     userConfig->setHMax(rtConfig->getMaxStep());
+    userConfig->saveToLittleFS();
+  } else if (rtConfig->getMaxStep() < rtConfig->getMinStep()) {  // homing failed
+    SS2K_LOG(MAIN_LOG_TAG, "Homing failed. Positions were reversed. Min:%d Max:%d", rtConfig->getMinStep(), rtConfig->getMaxStep());
+    rtConfig->setMaxStep(INT32_MIN);
+    rtConfig->setMinStep(INT32_MIN);
+    rtConfig->setHomed(false);
   }
-  // In case this was only one direction homing.
-  rtConfig->setMaxStep(userConfig->getHMax());
-  userConfig->saveToLittleFS();
-  rtConfig->setHomed(true);
-  this->setupTMCStepperDriver(true);
-  ss2k->setTargetPosition(0);
+  SS2K_LOG(MAIN_LOG_TAG, "Homing procedure complete.");
 }
 
 // Applies current power to driver
 void SS2K::updateStepperPower(int pwr) {
   uint16_t rmsPwr = (pwr == 0) ? userConfig->getStepperPower() : pwr;
-  driver.rms_current(rmsPwr);
-  uint16_t current = driver.cs_actual();
-  SS2K_LOG(MAIN_LOG_TAG, "Stepper power is now %d.  read:cs=%U", rmsPwr, current);
+  driver.rms_current(rmsPwr, HOLD_PWR_SCALER);
+  uint16_t current = driver.cs2rms(driver.cs_actual());
+  SS2K_LOG(MAIN_LOG_TAG, "Stepper power is now %d.  read:%d", rmsPwr, current);
 }
 
 // Applies current StealthChop to driver
@@ -686,31 +902,14 @@ void SS2K::updateStepperSpeed(int speed) {
     speed = userConfig->getStepperSpeed();
   }
   int s = stepper->getSpeedInMilliHz() / 1000;
-  //Because the conversion to/from the TMC driver is not perfect, we need to allow a little bit of slop.
-  //Skip the update if the speed is within 5 of the target.
-  if (abs(s-speed) < 5) {
+  // Because the conversion to/from the TMC driver is not perfect, we need to allow a little bit of slop.
+  // Skip the update if the speed is within 5 of the target.
+  if (abs(s - speed) < 5) {
     return;
   }
   speed = speed;
-  //SS2K_LOG(MAIN_LOG_TAG, "StepperSpeed is now %d, %d", speed, s);
+  // SS2K_LOG(MAIN_LOG_TAG, "StepperSpeed is now %d, %d", speed, s);
   stepper->setSpeedInHz(speed);
-}
-
-// Checks the driver temperature and throttles power if above threshold.
-void SS2K::checkDriverTemperature() {
-  static bool overTemp = false;
-  if (static_cast<int>(temperatureRead()) > THROTTLE_TEMP) {  // Start throttling driver power at 72C on the ESP32
-    uint8_t throttledPower = (THROTTLE_TEMP - static_cast<int>(temperatureRead())) + currentBoard.pwrScaler;
-    driver.irun(throttledPower);
-    SS2K_LOG(MAIN_LOG_TAG, "Over temp! Driver is throttling down! ESP32 @ %f C", temperatureRead());
-    overTemp = true;
-  } else if (static_cast<int>(temperatureRead()) < THROTTLE_TEMP) {
-    if (overTemp) {
-      SS2K_LOG(MAIN_LOG_TAG, "Temperature is now under control. Driver current reset.");
-      driver.irun(currentBoard.pwrScaler);
-    }
-    overTemp = false;
-  }
 }
 
 void SS2K::txSerial() {  // Serial.printf(" Before TX ");
@@ -748,15 +947,16 @@ void SS2K::txSerial() {  // Serial.printf(" Before TX ");
     txCheck++;
   }
 }
-
-void SS2K::pelotonConnected() {
+bool SS2K::pelotonConnected() {
   txCheck = TX_CHECK_INTERVAL;
-  if (rtConfig->resistance.getValue() > 0) {
+  if (millis() - rtConfig->resistance.getTimestamp() < 5000 && !rtConfig->resistance.getSimulate()) {
     rtConfig->setMinResistance(MIN_PELOTON_RESISTANCE);
     rtConfig->setMaxResistance(MAX_PELOTON_RESISTANCE);
+    return true;
   } else {
     rtConfig->setMinResistance(-DEFAULT_RESISTANCE_RANGE);
     rtConfig->setMaxResistance(DEFAULT_RESISTANCE_RANGE);
+    return false;
   }
 }
 
@@ -772,7 +972,8 @@ void SS2K::rxSerial(void) {
         for (int j = i; j < auxSerialBuffer.len; j++) {
           newBuf[j - i] = auxSerialBuffer.data[j];
         }
-        collectAndSet(PELOTON_DATA_UUID, PELOTON_DATA_UUID, PELOTON_ADDRESS, newBuf, newLen);
+        std::string uniqueName = "Peloton";
+        collectAndSet(PELOTON_DATA_UUID, PELOTON_DATA_UUID, uniqueName, newBuf, newLen);
       }
     }
   }

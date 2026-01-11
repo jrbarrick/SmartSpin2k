@@ -7,7 +7,7 @@
 
 #pragma once
 
-#ifndef UNIT_TEST
+#ifndef PLATFORMIO_ENV_NATIVE
 #include <Arduino.h>
 #else
 #include <ArduinoFake.h>
@@ -22,6 +22,8 @@ class Measurement {
   bool simulate;
   int value;
   int target;
+  int min;
+  int max;
   unsigned long timestamp;
 
  public:
@@ -41,6 +43,13 @@ class Measurement {
     target          = tar;
     this->timestamp = millis();
   }
+
+  void setMin(int min) { this->min = min; }
+  int getMin() { return min; }
+
+  void setMax(int max) { this->max = max; }
+  int getMax() { return max; }
+
   int getTarget() { return target; }
 
   long getTimestamp() { return timestamp; }
@@ -49,6 +58,8 @@ class Measurement {
     this->simulate  = false;
     this->value     = 0;
     this->target    = 0;
+    this->min       = 0;
+    this->max       = 0;
     this->timestamp = millis();
   }
 };
@@ -68,10 +79,9 @@ class RuntimeParameters {
 
  public:
   Measurement watts;
-  Measurement pm_batt;
   Measurement hr;
-  Measurement hr_batt;
   Measurement cad;
+  Measurement batt;
   Measurement resistance;
 
   void setTargetIncline(float inc) { targetIncline = inc; }
@@ -89,11 +99,11 @@ class RuntimeParameters {
   void setHomed(bool hmd) { homed = hmd; }
   int getHomed() { return homed; }
 
-  void setMinStep(int ms) { minStep = ms; }
-  int getMinStep() { return minStep; }
+  void setMinStep(int32_t ms) { ms != INT32_MIN ? minStep = ms : minStep = -DEFAULT_STEPPER_TRAVEL; }
+  int32_t getMinStep() { return minStep; }
 
-  void setMaxStep(int ms) { maxStep = ms; }
-  int getMaxStep() { return maxStep; }
+  void setMaxStep(int32_t ms) { ms != INT32_MIN ? maxStep = ms : maxStep = DEFAULT_STEPPER_TRAVEL; }
+  int32_t getMaxStep() { return maxStep; }
 
   void setSimTargetWatts(int tgt) { simTargetWatts = tgt; }
   bool getSimTargetWatts() { return simTargetWatts; }
@@ -123,6 +133,7 @@ class userParameters {
   int stepperSpeed;
   bool stepperDir;
   bool shifterDir;
+  bool pTab4Pwr              = false;
   bool udpLogEnabled         = false;
   int32_t hMin               = INT32_MIN;
   int32_t hMax               = INT32_MIN;
@@ -199,6 +210,9 @@ class userParameters {
   void setUdpLogEnabled(bool enabled) { udpLogEnabled = enabled; }
   bool getUdpLogEnabled() { return udpLogEnabled; }
 
+  void setPTab4Pwr(bool pTab) { pTab4Pwr = pTab; }
+  bool getPTab4Pwr() { return pTab4Pwr; }
+
   void setFoundDevices(String fdv) { foundDevices = fdv; }
   const char* getFoundDevices() { return foundDevices.c_str(); }
 
@@ -210,21 +224,6 @@ class userParameters {
 
   void setHomingSensitivity(int sensitivity) { homingSensitivity = sensitivity; }
   int getHomingSensitivity() { return homingSensitivity; }
-
-  void setDefaults();
-  String returnJSON();
-  void saveToLittleFS();
-  void loadFromLittleFS();
-  void printFile();
-};
-
-class physicalWorkingCapacity {
- public:
-  int session1HR;
-  int session1Pwr;
-  int session2HR;
-  int session2Pwr;
-  bool hr2Pwr;
 
   void setDefaults();
   String returnJSON();

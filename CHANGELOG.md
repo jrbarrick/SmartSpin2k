@@ -10,6 +10,275 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 ### Changed
+- Added feed forward, disabled PowerTable for ERG lookup. 
+- Added tests and removal of duplicates in pt column. 
+- Added removal of negative numbers in pt table. 
+- Refined ERG mode (stateful increase/decrease handling, smarter wait timers, improved PID logging).
+- Adjusted FTMS resistance handling: ignore malformed IC Bike ranges, log raw range data, and skip IC Bike resistance samples.
+- Rounded cadence/power calculations across CSC, CyclePower, Peloton, FTMS decoding; clamp invalid cadence values.
+- Applied rounding for FTMS shift targets/resistance mapping and homing thresholds; use fabs in resistance model and paused duplicate cleanup.
+
+### Hardware
+
+
+## [25.12.28]
+
+### Added
+
+### Changed
+- Removed >0 watts requirement to compute ERG.
+- Filter cadence for crazy values. Only >0 && <250 now accepted.
+- Filter watts for crazy values. Only >0 && <3000 now accepted. 
+- Fixed bug where scans may not happen even when configured devices aren't connected.  
+- Worked with Mark Roy to tune PID.
+- Added proper rounding from float to int for power and cadence.
+- More ERG tweaks for Marc Roy. 
+- If homed, we throw out negative PowerTable returns. 
+- After startup homing, set gear 8.
+
+### Hardware
+
+
+## [25.12.17]
+
+### Added
+
+### Changed
+ - Links card update.
+ - Removed indications from Control Point Characteristic to make Zwift on Android happy. 
+ - IC4 reported HR won't override other HRM.
+ - Improved ERG response for homed tables.
+ - Slightly faster Peloton bike + homing.
+
+### Hardware
+
+
+## [25.11.21]
+
+### Added
+
+### Changed
+- Make Zwift happy during spin down by sending "stop pedaling" every 1 second.
+- Added power scalers for stepper hold and homing.
+- Updated driver settings for improved stall detection.
+- FTMS bikes will now home using reported resistance if available.  
+
+### Hardware
+
+
+## [25.11.4]
+
+### Added
+
+### Changed
+- Added support for reading resistance range from connected FTMS devices
+- Improved resistance mode control logic for bikes with and without native resistance reporting
+- Fixed resistance value parsing to correctly handle 16-bit values
+- Reduced default max brake watts from 1400w to 1000w. 
+
+### Hardware
+
+
+## [25.10.19]
+
+### Added
+## [25.11.3]
+
+### Added
+
+### Changed
+
+### Hardware
+
+
+## [25.10.19]
+
+### Added
+- Added Rouvy Dircon. Working! 
+
+### Changed
+- Fixed Rouvy Connection 25-10-18 caused.
+- Updated build scripts. 
+
+### Hardware
+- Added Merach.
+
+
+## [25.9.30]
+
+### Added
+
+### Changed
+
+### Hardware
+
+
+## [25.9.8]
+
+### Added
+
+### Changed
+- WiFi will automatically switch/reset if needed after firmware update. 
+- BLE advertisement data reworked and optimized. 
+
+### Hardware
+
+
+## [25.8.26]
+
+### Added
+
+### Changed
+
+### Hardware
+
+
+## [25.9.17]
+
+### Added
+
+### Changed
+- Fixed incline mode handling negative numbers. 
+
+### Hardware
+
+
+## [25.9.8]
+
+### Added
+
+### Changed
+- Only check battery level on initial connection. This is to fix Tempo power meter drops. 
+- Moved battery information to the SpinBLEAdvertisedDevice class.
+- When adding to SpinBLEAdvertisedDevice, check adevname as well as address to prevent duplicates.
+- Stopped reusing BLE clients for better connection reliability.  
+
+### Hardware
+
+## [25.8.26]
+
+### Added
+
+### Changed
+- Unique (static) name generation for Android devices to prevent re-pairing issues.
+
+### Hardware
+
+
+## [25.8.26]
+
+### Added
+
+### Changed
+
+### Hardware
+
+
+## [25.8.26]
+
+### Added
+
+### Changed
+
+### Hardware
+
+
+## [25.8.18]
+
+### Added
+
+### Changed
+- Added better BLE device logging, even when a connection isn't made.
+- Fixed Echelon connections. 
+
+### Hardware
+
+## [25.8.16]
+
+### Added
+
+### Changed
+
+### Hardware
+
+## [25.8.3]
+
+### Added
+
+### Changed
+- Fixed rare crash due to calling new scan before the previous onScanEnd callback was complete. 
+- Removed serial printf's during updates as it was causing occasional update issues.
+
+### Hardware
+
+
+## [25.8.3]
+
+### Added
+
+### Changed
+
+### Hardware
+
+
+## [25.7.30]
+
+### Added
+
+### Changed
+
+### Hardware
+
+
+## [25.7.29]
+
+### Added
+- Added state machine for shifters allowing faster and more reliable shifting. 
+
+### Changed
+- Removed unused file. 
+- Added license to test files.
+- Fixed unterminated comment.
+- Fixed BLE and WiFI updates.
+- Improving use of pTab4Pwr.
+- Fixed edge cases of pTab4Pwr causing runaways.
+- Reduced the power output when no power table.
+- Fixed Dircon with Mywoosh.
+- Fixed Bug with Peloton data being requested too often. 
+- Fixed Bug with Dircon data being sent too often. 
+- Fixed Bug with BLE TX/RX being overwhelmed by the above two. 
+- Homing now takes multiple samples at the start of the run. 
+
+### Hardware
+
+
+## [25.5.31]
+
+### Added
+-Root CA certificates are now updated automatically during every build.
+
+### Changed
+
+- Added CSC sensor selection in BLE Scanner html.
+- Turned moving neighbors into a function, moved cubicspline class to power_table.h, merged dircon2, and changed added set_points changes
+
+### Fixed
+- Fixed stack smashing protection failure in SpinBLEAdvertisedDevice::enqueueData by adding a buffer size check to prevent overflow when handling BLE notifications larger than the buffer size
+
+### Hardware
+
+
+## [25.3.13]
+
+### Added
+
+### Changed
+- Multiple html and css improvements. 
+- Lookup uses existing interpolate and extrapolate functions. 
+### Hardware
+
+
+## [25.1.28]
 
 ### Hardware
 
@@ -19,6 +288,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 ### Changed
+- PID loop for ERG mode instead of P loop.
 - Fixed flags in CPS and CSC which were causing issues in GTA Bike. Thanks @matthewsshirley !
 - updated cert.h
 
