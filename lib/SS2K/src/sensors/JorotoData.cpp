@@ -140,7 +140,6 @@ void JorotoData::decode(uint8_t *data, size_t length) {
     else { potPercent = potValue / 25; }
     rtConfig->setMinResistance(MIN_JOROTO_RESISTANCE);
     rtConfig->setMaxResistance(MAX_JOROTO_RESISTANCE);
-    rtConfig->resistance.setValue(potPercent);
     //SS2K_LOG(JOROTO_LOG_TAG, " RS(%d)", potPercent);
     if (!this->hasCadence()) { jorotoCadence = 0; }
     else { jorotoCadence = this->getCadence(); }
