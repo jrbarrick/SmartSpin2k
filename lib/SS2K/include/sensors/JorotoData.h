@@ -9,6 +9,8 @@
 
 #include "SensorData.h"
 
+#define JOROTO_LOG_TAG "JOROTO"
+
 class JorotoData : public SensorData {
  public:
   JorotoData() : SensorData("JRT") {}
@@ -26,7 +28,14 @@ class JorotoData : public SensorData {
   void decode(uint8_t *data, size_t length);
 
  private:
-  float cadence  = nanf("");
   int resistance = INT_MIN;
   int power      = INT_MIN;
+  float cadence                 = nanf("");
+  float speed                   = nanf("");
+  uint32_t lastWheelEventTime   = 0;
+  uint32_t lastCrankEventTime   = 0;
+  uint32_t lastWheelRevolutions = 0;
+  uint32_t lastCrankRevolutions = 0;
+  unsigned long lastCadUpdateTime  = 0;
+  unsigned long lastPwrUpdateTime = 0;
 };

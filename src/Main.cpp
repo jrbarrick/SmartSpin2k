@@ -183,11 +183,6 @@ void loop() {  // Delete this task so we can make one that's more memory efficie
 void SS2K::maintenanceLoop(void* pvParameters) {
   static unsigned long intervalTimer2 = millis();
   static unsigned long rebootTimer    = millis();
-  static bool isScanning              = false;
-  static int potValue                 = 0;
-  static int potPercent               = 0;
-  static int cadence                  = 0;
-  static signed int power             = 0;
 
   while (true) {
     delay(10);
@@ -292,17 +287,6 @@ void SS2K::maintenanceLoop(void* pvParameters) {
     if (ss2k->saveFlag) {
       ss2k->saveFlag = false;
       userConfig->saveToLittleFS();
-      userPWC->saveToLittleFS();
-    }
-
-    // Things to do every two seconds
-    if ((millis() - intervalTimer) > 2003) {  // add check here for when to restart WiFi
-                                              // maybe if in STA mode and 8.8.8.8 no ping return?
-      // ss2k->restartWifi();
-     
-      logHandler.writeLogs();
-      webSocketAppender.Loop();
-      intervalTimer = millis();
     }
 
     // Things to do every 6 seconds
@@ -339,7 +323,7 @@ void SS2K::maintenanceLoop(void* pvParameters) {
       }
 #endif  // DEBUG_STACK
       // Log userParameters
-      SS2K_LOG(MAIN_LOG_TAG, "PM Con %d, CAD con %d, HRM Con %d, W %d, Cad %d, HR %d, Gear %d, Res %d, Current Pos %d, Target Pos %d", spinBLEClient.connectedPM,
+      SS2K_LOG(MAIN_LOG_TAG, "JRT Con %d, PM Con %d, CAD con %d, HRM Con %d, W %d, Cad %d, HR %d, Gear %d, Res %d, Current Pos %d, Target Pos %d", spinBLEClient.connectedJRT, spinBLEClient.connectedPM,
                spinBLEClient.connectedCD, spinBLEClient.connectedHRM, rtConfig->watts.getValue(), rtConfig->cad.getValue(), rtConfig->hr.getValue(), rtConfig->getShifterPosition(),
                rtConfig->resistance.getValue(), ss2k->getCurrentPosition(), ss2k->getTargetPosition());
 

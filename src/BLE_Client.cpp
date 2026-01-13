@@ -304,9 +304,11 @@ bool SpinBLEClient::connectToServer() {
     spinBLEClient.myBLEDevices[device_number].reset();
     return false;
   };
+  
   // Always create a brand-new client for each connection attempt.
   if (NimBLEDevice::getCreatedClientCount() >= NIMBLE_MAX_CONNECTIONS) {
-    Serial.println("Max clients reached - no more connections available");
+    SS2K_LOG(BLE_CLIENT_LOG_TAG, "Max clients reached - no more connections available");
+    //Serial.println("Max clients reached - no more connections available");
     return false;
   }
 
@@ -316,8 +318,9 @@ bool SpinBLEClient::connectToServer() {
   pClient->setSelfDelete(true, true);
   // Initial connection parameters: 15ms interval, 0 latency, 1000ms timeout (kept from previous logic)
   pClient->setConnectionParams(connectionParams[0], connectionParams[1], connectionParams[2], 1000);
-  pClient->setConnectTimeout(10000);  // 10 seconds
+  pClient->setConnectTimeout(connectionTimeout);  // 10 seconds
   if (!pClient->connect(myDevice, true, false, false)) {
+    SS2K_LOG(BLE_CLIENT_LOG_TAG, " - Failed to connect client");
     return handleFailedClientConnect();
   }
 
@@ -1106,9 +1109,15 @@ void SpinBLEAdvertisedDevice::set(const NimBLEAdvertisedDevice* device, int id, 
             SS2K_LOG(BLE_CLIENT_LOG_TAG, "Heart service on %s ignored (cfgHRM='%s')", this->uniqueName.c_str(), cfgHRM);
           }
         } else if (serviceUUID == CSCSERVICE_UUID) {
-          this->isCSC               = true;
-          spinBLEClient.connectedCD = true;
-          SS2K_LOG(BLE_CLIENT_LOG_TAG, "Registered CSC on Connect");
+          if(this->uniqueName.find("JOROTO-BK") != std::string::npos) {
+            this->isJRT                = true;
+            spinBLEClient.connectedJRT = true;
+            SS2K_LOG(BLE_CLIENT_LOG_TAG, "Registered Joroto bike on Connect");
+          } else {
+            this->isCSC               = true;
+            spinBLEClient.connectedCD = true; 
+            SS2K_LOG(BLE_CLIENT_LOG_TAG, "Registered CSC on Connect");
+          }
         } else if (serviceUUID == CYCLINGPOWERSERVICE_UUID || serviceUUID == FITNESSMACHINESERVICE_UUID ||
                    (serviceUUID == FLYWHEEL_UART_SERVICE_UUID && this->uniqueName.find("Flywheel") != std::string::npos) || serviceUUID == ECHELON_DEVICE_UUID ||
                    serviceUUID == PELOTON_DATA_UUID) {

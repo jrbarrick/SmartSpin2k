@@ -30,6 +30,7 @@
 // latency – [in] The number of packets allowed to skip (extends max interval).
 // timeout – [in] The timeout time in 10ms units before disconnecting.
 const uint16_t connectionParams[] = {24, 48, 0, 200};
+const uint16_t connectionTimeout = 10000;
 
 // Vector of supported BLE services and their corresponding characteristic UUIDs
 struct BLEServiceInfo {
@@ -162,6 +163,7 @@ class SpinBLEAdvertisedDevice {
   bool isHRM           = false;
   bool isPM            = false;
   bool isCSC           = false;
+  bool isJRT           = false;
   bool isCT            = false;
   bool isRemote        = false;
   bool doConnect       = false;
@@ -181,6 +183,7 @@ class SpinBLEClient {
   boolean connectedPM            = false;
   boolean connectedHRM           = false;
   boolean connectedCD            = false;
+  boolean connectedJRT           = false;
   boolean connectedCT            = false;
   boolean connectedSpeed         = false;
   boolean connectedRemote        = false;

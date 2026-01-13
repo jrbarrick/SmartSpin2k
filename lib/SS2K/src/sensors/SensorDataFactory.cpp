@@ -38,7 +38,11 @@ std::shared_ptr<SensorData> SensorDataFactory::getSensorData(const NimBLEUUID ch
   } else if (characteristicUUID == PELOTON_DATA_UUID) {
     sensorData = std::shared_ptr<SensorData>(new PelotonData());
   } else if (characteristicUUID == CSCMEASUREMENT_UUID) {
-    sensorData = std::shared_ptr<SensorData>(new CscSensorData());
+    if(uniqueName.find("JOROTO-BK") != std::string::npos) {
+      sensorData = std::shared_ptr<SensorData>(new JorotoData());  
+    } else {
+      sensorData = std::shared_ptr<SensorData>(new CscSensorData());
+    }
   } else {
     return NULL_SENSOR_DATA;
   }

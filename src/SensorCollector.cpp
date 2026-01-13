@@ -85,58 +85,6 @@ void collectAndSet(NimBLEUUID charUUID, NimBLEUUID serviceUUID, std::string& uni
         rtConfig->watts.setValue(0);
         logBufLength += snprintf(logBuf + logBufLength, kLogBufMaxLength - logBufLength, " PW IGNORED");
       }
-      /*
-      // Original code
-      int power = sensorData->getPower() * userConfig->getPowerCorrectionFactor();
-      rtConfig->watts.setValue(power);
-      spinBLEClient.connectedPM = true;
-      logBufLength += snprintf(logBuf + logBufLength, kLogBufMaxLength - logBufLength, " PW(%d)", power % 10000);
-      */
-
-      // Joroto testing
-      int jorotoPower = 0;
-      int jorotoCadence = 0;
-      int potPercent = 0;
-      int potValue = 0;
-      
-      // Do 2 reads to smooth things a bit
-      potValue = analogRead(POT_PIN);
-      potValue += analogRead(POT_PIN);
-      potValue /= 2;
-      if (potValue == 4095) {
-        logBufLength += snprintf(logBuf + logBufLength, kLogBufMaxLength - logBufLength, "Pot not connected.");
-      }
-      //else if (potValue == 0) {
-        //logBufLength += snprintf(logBuf + logBufLength, kLogBufMaxLength - logBufLength, "Pot too low.");
-      //}
-      else {
-        // Potentiometer < 50 is min according to Joroto display
-        if (potValue < 50) { potPercent = 1; }
-        // Potentiometer >=2500 is max according to Joroto display
-        else if(potValue >= 2500) { potPercent = 100; }
-        // Percentage on Joroto display is the potentiometer value / 25
-        else { potPercent = potValue / 25; }
-        rtConfig->setMinResistance(MIN_PELOTON_RESISTANCE);
-        rtConfig->setMaxResistance(MAX_PELOTON_RESISTANCE);
-        rtConfig->resistance.setValue(potPercent);
-        logBufLength += snprintf(logBuf + logBufLength, kLogBufMaxLength - logBufLength, " RS(%d)", potPercent);
-        jorotoCadence = rtConfig->cad.getValue();
-        // Cadence < 15 is treated as 0 by the Joroto display
-        if (jorotoCadence < 15) { jorotoCadence = 0; }
-        // Joroto power calc gets weird when resistance is below 10%
-        if (potPercent < 10) {
-          jorotoPower = potValue / 25.0f * pow((jorotoCadence / 100.0f), 1.5f) * 7.228958f + jorotoCadence - (jorotoCadence / 100.0f) * 60.0f;
-          logBufLength += snprintf(logBuf + logBufLength, kLogBufMaxLength - logBufLength, " Low Calc");
-        } else { 
-          jorotoPower = potValue / 25.0f * pow((jorotoCadence / 100.0f), 1.5f) * 7.228958f + jorotoCadence - 40;
-          logBufLength += snprintf(logBuf + logBufLength, kLogBufMaxLength - logBufLength, " Reg Calc");
-        }
-        // Can sometimes get weird power cals at very low cadence/resistance levels, just set power to 0
-        if (jorotoPower < 0) { jorotoPower = 0; }
-        logBufLength += snprintf(logBuf + logBufLength, kLogBufMaxLength - logBufLength, " PW(%d)", jorotoPower);
-        rtConfig->watts.setValue(jorotoPower);
-        spinBLEClient.connectedPM = true;
-      } 
     }
   }
 
