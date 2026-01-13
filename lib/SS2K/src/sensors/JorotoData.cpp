@@ -138,8 +138,8 @@ void JorotoData::decode(uint8_t *data, size_t length) {
     else if(potValue >= 2500) { potPercent = 100; }
     // Percentage on Joroto display is the potentiometer value / 25
     else { potPercent = potValue / 25; }
-    rtConfig->setMinResistance(1);
-    rtConfig->setMaxResistance(100);
+    rtConfig->setMinResistance(MIN_JOROTO_RESISTANCE);
+    rtConfig->setMaxResistance(MAX_JOROTO_RESISTANCE);
     rtConfig->resistance.setValue(potPercent);
     //SS2K_LOG(JOROTO_LOG_TAG, " RS(%d)", potPercent);
     if (!this->hasCadence()) { jorotoCadence = 0; }
