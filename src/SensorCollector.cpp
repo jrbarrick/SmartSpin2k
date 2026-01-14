@@ -9,7 +9,6 @@
 #include "SS2KLog.h"
 #include "Constants.h"
 #include "BLE_Common.h"
-#include <Arduino.h>
 
 #include <sensors/SensorData.h>
 #include <sensors/SensorDataFactory.h>
@@ -29,7 +28,7 @@ void collectAndSet(NimBLEUUID charUUID, NimBLEUUID serviceUUID, std::string& uni
   char logBuf[kLogBufMaxLength];
   SS2K_LOGD(BLE_COMMON_LOG_TAG, "Data length: %d", length);
   int logBufLength = ss2k_log_hex_to_buffer(pData, length, logBuf, 0, kLogBufMaxLength);
-  
+
   logBufLength += snprintf(logBuf + logBufLength, kLogBufMaxLength - logBufLength, "<- %.8s | %.8s", serviceUUID.toString().c_str(), charUUID.toString().c_str());
 
   std::shared_ptr<SensorData> sensorData = sensorDataFactory.getSensorData(charUUID, uniqueName, pData, length);

@@ -112,11 +112,6 @@ void JorotoData::decode(uint8_t *data, size_t length) {
     lastCrankEventTime = crankEventTime;
   }
   
-  // Joroto testing
-  const int kLogBufMaxLength = 250;
-  char logBuf[kLogBufMaxLength];
-  int logBufLength = 0;
-
   int jorotoPower = 0;
   float jorotoCadence = 0;
   int potPercent = 0;
